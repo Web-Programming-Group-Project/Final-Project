@@ -4,14 +4,16 @@ import { useState } from "react";
 import LoginRegister from "../components/login-register";
 
 export default function Home() {
-    //const [showAuth, setShowAuth] = useState<null | "login" | "register">(null);
+    const [showAuth, setShowAuth] = useState(null);
 
     function handleLogin(username, password) {
         // Implement login logic here
+        console.log("Logging in", { username, password });
     }
 
     function handleRegister(username, email, password) {
         // Implement registration logic here
+        console.log("Registering", { username, email, password });
     }
 
     return (
@@ -39,7 +41,7 @@ export default function Home() {
             </div>
         </main>
         <div className="h-2 border-t border-sky-500" />
-        {/*showAuth && (
+        {showAuth && (
             <LoginRegister
                 authenticationType={showAuth}
                 isOpen
@@ -47,7 +49,7 @@ export default function Home() {
                 onLogin={handleLogin}
                 onRegister={handleRegister}
             />
-        )*/}
+        )}
         </div>
     );
 }
