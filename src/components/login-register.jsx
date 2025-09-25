@@ -66,7 +66,7 @@ export default function LoginRegister({ authenticationType, onLogin, onRegister,
                         />
                     </FormGroup>
                     <div className={Classes.DIALOG_FOOTER}>
-                        <Button type="submit" intent="primary">
+                        <Button type="submit" intent="primary" onClick={() => { reset() }}>
                             {active === "login" ? "Login" : "Register"}
                         </Button>
                     </div>
