@@ -43,6 +43,7 @@ export default function LoginRegister({ authenticationType, onLogin, onRegister,
                             id="username-input"
                             value={username}
                             onChange={(e) => setUsername(e.target.value)}
+                            required
                         />
                     </FormGroup>
                     {active === "register" && (
@@ -51,6 +52,7 @@ export default function LoginRegister({ authenticationType, onLogin, onRegister,
                                 id="email-input"
                                 value={email}
                                 onChange={(e) => setEmail(e.target.value)}
+                                required
                             />
                         </FormGroup>
                     )}
@@ -60,6 +62,7 @@ export default function LoginRegister({ authenticationType, onLogin, onRegister,
                             type="password"
                             value={password}
                             onChange={(e) => setPassword(e.target.value)}
+                            required
                         />
                     </FormGroup>
                     <div className={Classes.DIALOG_FOOTER}>
