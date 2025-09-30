@@ -5,12 +5,11 @@ import {
   Button,
   FormGroup,
   InputGroup,
-  Tabs,
-  Tab,
 } from "@blueprintjs/core";
+import { useState } from "react";
 
 export default function LoginRegister({ authenticationType, onLogin, onRegister, isOpen, onClose }) {
-    const [active, setActive] = useState<"login" | "register">(authenticationType);
+    const [active, setActive] = useState(authenticationType);
     const [username, setUsername] = useState("");
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
@@ -19,6 +18,7 @@ export default function LoginRegister({ authenticationType, onLogin, onRegister,
         setUsername("");
         setEmail("");
         setPassword("");
+        onClose();
     }
 
     const handleSubmit = (e) => {
@@ -32,25 +32,18 @@ export default function LoginRegister({ authenticationType, onLogin, onRegister,
 
     return (
         <Dialog isOpen={isOpen} onClose={onClose}>
-            <div className={Classes.DIALOG_HEADER}>
+            <div className={`${Classes.DIALOG_HEADER} flex items-center justify-between`}>
                 <h4>{active === "login" ? "Login" : "Register"}</h4>
-                <Button minimal icon="cross" onClick={() => { onClose(); reset(); }} />
+                <Button alignText="end" icon="cross" onClick={() => { reset() }} />
             </div>
             <div className={Classes.DIALOG_BODY}>
-                <Tabs
-                    id="LoginRegisterTabs"
-                    selectedTabId={active}
-                    onChange={setActive}
-                >
-                    <Tab id="login" title="Login" />
-                    <Tab id="register" title="Register" />
-                </Tabs>
                 <form onSubmit={handleSubmit}>
                     <FormGroup label="Username" labelFor="username-input">
                         <InputGroup
                             id="username-input"
                             value={username}
                             onChange={(e) => setUsername(e.target.value)}
+                            required
                         />
                     </FormGroup>
                     {active === "register" && (
@@ -59,6 +52,7 @@ export default function LoginRegister({ authenticationType, onLogin, onRegister,
                                 id="email-input"
                                 value={email}
                                 onChange={(e) => setEmail(e.target.value)}
+                                required
                             />
                         </FormGroup>
                     )}
@@ -68,10 +62,11 @@ export default function LoginRegister({ authenticationType, onLogin, onRegister,
                             type="password"
                             value={password}
                             onChange={(e) => setPassword(e.target.value)}
+                            required
                         />
                     </FormGroup>
                     <div className={Classes.DIALOG_FOOTER}>
-                        <Button type="submit" intent="primary">
+                        <Button type="submit" intent="primary" onClick={() => { reset() }}>
                             {active === "login" ? "Login" : "Register"}
                         </Button>
                     </div>
