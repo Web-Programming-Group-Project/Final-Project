@@ -28,3 +28,16 @@ meetingList[2] = "MeetingID3";
 function displayMeetings(){
 	
 }
+
+
+let meetingList = [
+  "MeetingID_A1",
+  "MeetingID_A2"
+];
+
+// Function to add a new meeting to the list
+function addMeeting(newId) {
+  meetingList.push(newId);
+  console.log("Jack Aitken updated meetings:", meetingList);
+}
+
