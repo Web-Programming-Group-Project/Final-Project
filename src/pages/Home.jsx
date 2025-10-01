@@ -1,5 +1,5 @@
 import React from "react";
-import { Link } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { useState } from "react";
 import LoginRegister from "../components/login-register";
 import { loginUser, registerUser } from "../Api";
@@ -7,12 +7,14 @@ import { loginUser, registerUser } from "../Api";
 export default function Home() {
     const [showAuth, setShowAuth] = useState(null);
     const [user, setUser] = useState(null);
+    const navigate = useNavigate();
 
     async function handleLogin(username, password) {
         const data = await loginUser({ username, password });
         if (!data?.user) throw new Error(data?.message || "Login failed");
         setUser(data.user);
         setShowAuth(null);
+        navigate("/JoinCreate");
     }
 
     async function handleRegister(username, email, password) {
@@ -20,6 +22,7 @@ export default function Home() {
         if (!data?.user) throw new Error(data?.message || "Registration failed");
         setUser(data.user);
         setShowAuth(null);
+        navigate("/JoinCreate");
     }
 
     return (
