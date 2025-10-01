@@ -1,12 +1,13 @@
 import React from "react";
 import { useNavigate } from "react-router-dom";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import LoginRegister from "../components/login-register";
 import { loginUser, registerUser } from "../Api";
+import { useAppContext } from "../AppContext";
 
 export default function Home() {
     const [showAuth, setShowAuth] = useState(null);
-    const [user, setUser] = useState(null);
+    const { user, setUser } = useAppContext();
     const navigate = useNavigate();
 
     async function handleLogin(username, password) {

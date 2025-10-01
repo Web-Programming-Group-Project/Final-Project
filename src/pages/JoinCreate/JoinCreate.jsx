@@ -32,9 +32,12 @@ function displayMeetings(){
 */
 
 import React from "react";
+import { useAppContext } from "../../AppContext";
 
 export default function JoinCreate() {
+  const { user } = useAppContext();
+
   return (
-    <div>JoinCreate</div>
+    <div>Hello {user?.username}</div>
   );
 }
