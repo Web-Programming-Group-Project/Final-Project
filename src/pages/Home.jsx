@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import LoginRegister from "../components/login-register";
 import { loginUser, registerUser } from "../Api";
 import { useAppContext } from "../AppContext";
+import Header from "../components/Header";
 
 export default function Home() {
     const [showAuth, setShowAuth] = useState(null);
@@ -28,7 +29,7 @@ export default function Home() {
 
     return (
         <div className="min-h-screen flex flex-col">
-        <div className="h-10 bg-sky-700" />
+        <Header />
         <main className="flex-1 flex items-center justify-center">
             <div className="text-center px-4">
             <h1 className="text-6xl md:text-8xl font-semibold text-slate-900 leading-tight">

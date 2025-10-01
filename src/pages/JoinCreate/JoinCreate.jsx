@@ -33,11 +33,12 @@ function displayMeetings(){
 
 import React from "react";
 import { useAppContext } from "../../AppContext";
+import Header from "../../components/Header";
 
 export default function JoinCreate() {
   const { user } = useAppContext();
 
   return (
-    <div>Hello {user?.username}</div>
+    <Header />
   );
 }
