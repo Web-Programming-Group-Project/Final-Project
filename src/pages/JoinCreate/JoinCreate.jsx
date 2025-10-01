@@ -21,7 +21,7 @@ meetingList[2] = "MeetingID3";
 //allows the user to select a meeting to join
 
 //Meeting display
-<div class="meetingDisplay"
+<div class="meetingDisplay">
 //Create a new div for each meeting, it should function as a button to join that specific meeting, and display some information about each meeting stored in the meetingList
 </div>
 

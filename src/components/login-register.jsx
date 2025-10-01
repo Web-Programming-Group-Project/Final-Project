@@ -25,7 +25,7 @@ export default function LoginRegister({ authenticationType, onLogin, onRegister,
 
     const handleClose = () => {
         if (loading) return;
-        resetFields();
+        reset();
         onClose();
     };
 
@@ -51,7 +51,7 @@ export default function LoginRegister({ authenticationType, onLogin, onRegister,
         <Dialog isOpen={isOpen} onClose={handleClose}>
             <div className={`${Classes.DIALOG_HEADER} flex items-center justify-between`}>
                 <h4>{active === "login" ? "Login" : "Register"}</h4>
-                <Button alignText="end" icon="cross" onClick={() => { handleClose }} disabled={loading} />
+                <Button alignText="end" icon="cross" onClick={handleClose} disabled={loading} />
             </div>
             <div className={Classes.DIALOG_BODY}>
                 <form onSubmit={handleSubmit}>

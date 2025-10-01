@@ -25,7 +25,7 @@ app.use(
 
 app.use(express.json());
 
-// Checks connection to server - run curl -i http://localhost:8080/ping to test
+// Checks connection to server - run curl -i http://localhost:8080/ping when serving is running to test connection
 app.get("/ping", (req, res) => {
   res.send("pong");
 });
