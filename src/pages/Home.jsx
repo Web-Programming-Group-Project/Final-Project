@@ -9,25 +9,17 @@ export default function Home() {
     const [user, setUser] = useState(null);
 
     async function handleLogin(username, password) {
-        try {
-            const data = await loginUser({ username, password });
-            if (!data?.user) throw new Error(data?.message || "Login failed");
-            setUser(data.user);
-            setShowAuth(null);
-        } catch (error) {
-            alert(error.message);
-        }
+        const data = await loginUser({ username, password });
+        if (!data?.user) throw new Error(data?.message || "Login failed");
+        setUser(data.user);
+        setShowAuth(null);
     }
 
     async function handleRegister(username, email, password) {
-        try {
-            const data = await registerUser({ username, email, password });
-            if (!data?.user) throw new Error(data?.message || "Registration failed");
-            setUser(data.user);
-            setShowAuth(null);
-        } catch (error) {
-            alert(error.message);
-        }
+        const data = await registerUser({ username, email, password });
+        if (!data?.user) throw new Error(data?.message || "Registration failed");
+        setUser(data.user);
+        setShowAuth(null);
     }
 
     return (
