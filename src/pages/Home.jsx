@@ -2,18 +2,32 @@ import React from "react";
 import { Link } from "react-router-dom";
 import { useState } from "react";
 import LoginRegister from "../components/login-register";
+import { loginUser, registerUser } from "../Api";
 
 export default function Home() {
     const [showAuth, setShowAuth] = useState(null);
+    const [user, setUser] = useState(null);
 
-    function handleLogin(username, password) {
-        // Implement login logic here
-        console.log("Logging in", { username, password });
+    async function handleLogin(username, password) {
+        try {
+            const data = await loginUser({ username, password });
+            if (!data?.user) throw new Error(data?.message || "Login failed");
+            setUser(data.user);
+            setShowAuth(null);
+        } catch (error) {
+            alert(error.message);
+        }
     }
 
-    function handleRegister(username, email, password) {
-        // Implement registration logic here
-        console.log("Registering", { username, email, password });
+    async function handleRegister(username, email, password) {
+        try {
+            const data = await registerUser({ username, email, password });
+            if (!data?.user) throw new Error(data?.message || "Registration failed");
+            setUser(data.user);
+            setShowAuth(null);
+        } catch (error) {
+            alert(error.message);
+        }
     }
 
     return (

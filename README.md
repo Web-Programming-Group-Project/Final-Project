@@ -8,7 +8,7 @@ Web Programming Final Project
 5. `cd` into the server directory 
 6. Create a .env file and copy and paste this code into it:
     ```
-    PORT=5000
+    PORT=8080
     MONGODB_URI=mongodb+srv://convo_db_user:POkT9iC7EiEE1rcw@cluster0.bpzjy1i.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0
     JWT_SECRET=Yk+KJtpuSU0CfyjPzrNW2cL9XQm/JZxDKQ38bBdDuhM=
     CORS_ORIGIN=http://localhost:5173
