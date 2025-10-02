@@ -17,7 +17,7 @@ export default function Header() {
 
         {user ? (
             <div className="flex items-center gap-4">
-            <span>{user.username}</span>
+            <span>{user.firstName} {user.lastName}</span>
             <button
                 onClick={handleSignOut}
                 className="bg-sky-700 hover:bg-sky-600 text-white px-3 py-1 rounded-md text-sm transition-colors"
