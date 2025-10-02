@@ -2,7 +2,7 @@ import React from "react";
 import { useNavigate } from "react-router-dom";
 import { useState, useEffect } from "react";
 import LoginRegister from "../components/login-register";
-import { loginUser, registerUser } from "../Api";
+import { loginUser, registerUser } from "../api";
 import { useAppContext } from "../AppContext";
 import Header from "../components/Header";
 
@@ -19,8 +19,8 @@ export default function Home() {
         navigate("/JoinCreate");
     }
 
-    async function handleRegister(username, email, password) {
-        const data = await registerUser({ username, email, password });
+    async function handleRegister(username, email, password, firstName, lastName) {
+        const data = await registerUser({ username, email, password, firstName, lastName });
         if (!data?.user) throw new Error(data?.message || "Registration failed");
         setUser(data.user);
         setShowAuth(null);
