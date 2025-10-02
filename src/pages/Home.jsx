@@ -1,24 +1,35 @@
 import React from "react";
-import { Link } from "react-router-dom";
-import { useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { useState, useEffect } from "react";
 import LoginRegister from "../components/login-register";
+import { loginUser, registerUser } from "../Api";
+import { useAppContext } from "../AppContext";
+import Header from "../components/Header";
 
 export default function Home() {
     const [showAuth, setShowAuth] = useState(null);
+    const { user, setUser } = useAppContext();
+    const navigate = useNavigate();
 
-    function handleLogin(username, password) {
-        // Implement login logic here
-        console.log("Logging in", { username, password });
+    async function handleLogin(username, password) {
+        const data = await loginUser({ username, password });
+        if (!data?.user) throw new Error(data?.message || "Login failed");
+        setUser(data.user);
+        setShowAuth(null);
+        navigate("/JoinCreate");
     }
 
-    function handleRegister(username, email, password) {
-        // Implement registration logic here
-        console.log("Registering", { username, email, password });
+    async function handleRegister(username, email, password) {
+        const data = await registerUser({ username, email, password });
+        if (!data?.user) throw new Error(data?.message || "Registration failed");
+        setUser(data.user);
+        setShowAuth(null);
+        navigate("/JoinCreate");
     }
 
     return (
         <div className="min-h-screen flex flex-col">
-        <div className="h-10 bg-sky-700" />
+        <Header />
         <main className="flex-1 flex items-center justify-center">
             <div className="text-center px-4">
             <h1 className="text-6xl md:text-8xl font-semibold text-slate-900 leading-tight">

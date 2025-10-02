@@ -13,28 +13,45 @@ export default function LoginRegister({ authenticationType, onLogin, onRegister,
     const [username, setUsername] = useState("");
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
+    const [loading, setLoading] = useState(false);
+    const [err, setErr] = useState("");
 
     const reset = () => {
         setUsername("");
         setEmail("");
         setPassword("");
-        onClose();
+        setErr("");
     }
 
-    const handleSubmit = (e) => {
+    const handleClose = () => {
+        if (loading) return;
+        reset();
+        onClose();
+    };
+
+    const handleSubmit = async (e) => {
         e.preventDefault();
-        if (active === "login") {
-        onLogin(username.trim(), password);
-        } else {
-        onRegister(username.trim(), email.trim(), password);
+        setLoading(true);
+        try {
+            if (active === "login") {
+                await onLogin(username.trim(), password);
+            } else {
+                await onRegister(username.trim(), email.trim(), password);
+            }
+            reset();
+            requestAnimationFrame(() => onClose());
+        } catch (error) {
+            setErr(error?.message || "Something went wrong");
+        } finally {
+            setLoading(false);
         }
     }
 
     return (
-        <Dialog isOpen={isOpen} onClose={onClose}>
+        <Dialog isOpen={isOpen} onClose={handleClose}>
             <div className={`${Classes.DIALOG_HEADER} flex items-center justify-between`}>
                 <h4>{active === "login" ? "Login" : "Register"}</h4>
-                <Button alignText="end" icon="cross" onClick={() => { reset() }} />
+                <Button alignText="end" icon="cross" onClick={handleClose} disabled={loading} />
             </div>
             <div className={Classes.DIALOG_BODY}>
                 <form onSubmit={handleSubmit}>
@@ -44,6 +61,7 @@ export default function LoginRegister({ authenticationType, onLogin, onRegister,
                             value={username}
                             onChange={(e) => setUsername(e.target.value)}
                             required
+                            disabled={loading}
                         />
                     </FormGroup>
                     {active === "register" && (
@@ -53,6 +71,7 @@ export default function LoginRegister({ authenticationType, onLogin, onRegister,
                                 value={email}
                                 onChange={(e) => setEmail(e.target.value)}
                                 required
+                                disabled={loading}
                             />
                         </FormGroup>
                     )}
@@ -63,10 +82,13 @@ export default function LoginRegister({ authenticationType, onLogin, onRegister,
                             value={password}
                             onChange={(e) => setPassword(e.target.value)}
                             required
+                            disabled={loading}
                         />
                     </FormGroup>
-                    <div className={Classes.DIALOG_FOOTER}>
-                        <Button type="submit" intent="primary" onClick={() => { reset() }}>
+                    {err && <p className="text-sm text-red-600 mb-2">{err}</p>}
+                    <div className={`${Classes.DIALOG_FOOTER} flex justify-end gap-2`}>
+                        <Button onClick={handleClose} disabled={loading}>Cancel</Button>
+                        <Button type="submit" intent="primary" loading={loading} disabled={loading || !username || !password || (active === "register" && !email)}>
                             {active === "login" ? "Login" : "Register"}
                         </Button>
                     </div>

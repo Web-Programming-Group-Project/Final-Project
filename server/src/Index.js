@@ -8,8 +8,28 @@ const User = require("./models/User");
 dotenv.config();
 
 const app = express();
+const allowedOrigins = [
+  "http://localhost:5173",
+  "http://127.0.0.1:5173",
+  // More origins will be needed, such as the Netlify URL in prod when we deploy this 
+];
+
+app.use(
+  cors({
+    origin: allowedOrigins,
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+    credentials: true,
+  })
+);
+
 app.use(express.json());
-app.use(cors());
+
+// Checks connection to server - run curl -i http://localhost:8080/ping when serving is running to test connection
+app.get("/ping", (req, res) => {
+  res.send("pong");
+});
+
 
 // connect to MongoDB
 mongoose.connect(process.env.MONGODB_URI)
@@ -47,12 +67,12 @@ app.post("/api/login", async (req, res) => {
 
   const user = await User.findOne({ username });
   if (!user || user.password !== password) {
-    return res.status(400).json({ message: "Invalid username or password" });
+    return res.status(401).json({ message: "Invalid username or password" });
   }
 
   res.json({ message: "Login successful", user });
 });
 
 // start server
-const PORT = process.env.PORT;
+const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));
