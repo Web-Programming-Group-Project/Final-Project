@@ -15,4 +15,6 @@ Web Programming Final Project
     COOKIE_SECURE=false 
     ```
 6. Run `npm install` in terminal to download server specific packages
-7. Run `npm run dev` in root and server directory to locally host web app
+7. Run `make dev` in the project root directory to locally host web app 
+8. Run `make stop` to stop hosting the web app
+    - Note: The two commands above are from the Makefile and are a short cut for running npm run dev twice in two different directories
