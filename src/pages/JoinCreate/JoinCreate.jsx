@@ -1,44 +1,82 @@
+import React from "react";
+import { useEffect, useMemo, useState } from 'react';
+import { useAppContext } from "../../AppContext";
+import Header from "../../components/Header";
+import { useNavigate } from "react-router-dom";
+
 //Page with join and create meeting functionality
 //Accesses the list of meetings (for join functionality) Data structure for weekly report
 //Accesses the MeetingSettings page (for create functionality)
 
-//let meetingList = []; //Data structure (connect with MongoDB at some point)
 //Fill the meeting list with data from the database
 
-//Hardcoded test data
-//meetingList[0] = "MeetingID1";
-//meetingList[1] = "MeetingID2";
-//meetingList[2] = "MeetingID3";
-
-//Topbar section =================================================================================
-//has button that links to signin page
-
-//Create New Meeting section =====================================================================
-//links to meeting settings page
-
-//Join Meeting section ===========================================================================
-//displays the list of meetings
-//allows the user to select a meeting to join
-
-//Meeting display
 /*
-<div class="meetingDisplay">
-//Create a new div for each meeting, it should function as a button to join that specific meeting, and display some information about each meeting stored in the meetingList
-</div>
-
 function displayMeetings(){
 	
 }
 */
 
-import React from "react";
-import { useAppContext } from "../../AppContext";
-import Header from "../../components/Header";
-
 export default function JoinCreate() {
-  const { user } = useAppContext();
+  const [meetingList, setMeetingList] = useState([]);
 
+  const { user } = useAppContext();
+  const navigate = useNavigate(); 
+  const activeMeetings = 0;//Stores the number of active meetings
+
+  function testJoin(){
+    //navigate("/Meetings");
+    console.log(meetingList);
+  }
+
+  function testAdd(){
+    setMeetingList(
+        [
+            ...meetingList,
+            { id: meetingList.length, name: "Test" } // The id will be the number next available, the name can be anything
+        ]
+        );
+    //navigate("/MeetingSeetings");
+  }
+  
   return (
-    <Header />
+    <>
+      <Header />
+      <div className="panel-header">
+        <h2 id="meeting-heading">Current Meetings</h2>
+        <h2 id="convo-heading">Convo</h2>
+      </div>
+      <div className="page-divider">
+        <table className="meeting-table" id="meetingTable">
+          <thead>
+            <tr>
+              <th scope="col">Meeting Name</th>
+            </tr>
+          </thead>
+          <tbody id="meeting-list">
+            {meetingList.map((meeting) => (
+            <tr key={meeting.id} >
+              <td>Meeting Number {meeting.id} {meeting.name}</td>
+            </tr>
+          ))}
+          </tbody>
+        </table>
+        <div className="button-section">
+          <button
+            className="LargeButton"
+            id = "Creator"
+            onClick={testAdd}
+          >
+          Create Meeting
+          </button>
+          <button
+            className="LargeButton"
+            id = "Joiner"
+            onClick={testJoin}
+          >
+          Join Meeting
+          </button>
+        </div>
+      </div>
+    </>
   );
 }
