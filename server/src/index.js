@@ -39,14 +39,14 @@ mongoose.connect(process.env.MONGODB_URI)
 
 // POST /api/register
 app.post("/api/register", async (req, res) => {
-  const { username, email, password } = req.body;
+  const { username, email, password, firstName, lastName } = req.body;
 
-  if (!username || !email || !password) {
-    return res.status(400).json({ message: "Username, email, and password are required" });
+  if (!username || !email || !password || !firstName || !lastName) {
+    return res.status(400).json({ message: "Username, email, password, first name, and last name are required" });
   }
 
   try {
-    const user = new User({ username, email, password }); 
+    const user = new User({ username, email, password, firstName, lastName });
     await user.save();
     res.json({ message: "User registered successfully", user });
   } catch (err) {

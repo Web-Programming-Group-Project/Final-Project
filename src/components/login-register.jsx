@@ -7,12 +7,15 @@ import {
   InputGroup,
 } from "@blueprintjs/core";
 import { useState } from "react";
+import { Form } from "react-router-dom";
 
 export default function LoginRegister({ authenticationType, onLogin, onRegister, isOpen, onClose }) {
     const [active, setActive] = useState(authenticationType);
     const [username, setUsername] = useState("");
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
+    const [firstName, setFirstName] = useState("");
+    const [lastName, setLastName] = useState("");
     const [loading, setLoading] = useState(false);
     const [err, setErr] = useState("");
 
@@ -36,7 +39,7 @@ export default function LoginRegister({ authenticationType, onLogin, onRegister,
             if (active === "login") {
                 await onLogin(username.trim(), password);
             } else {
-                await onRegister(username.trim(), email.trim(), password);
+                await onRegister(username.trim(), email.trim(), password, firstName.trim(), lastName.trim());
             }
             reset();
             requestAnimationFrame(() => onClose());
@@ -65,6 +68,25 @@ export default function LoginRegister({ authenticationType, onLogin, onRegister,
                         />
                     </FormGroup>
                     {active === "register" && (
+                        <>
+                        <FormGroup label="First Name" labelFor="first-name-input">
+                            <InputGroup
+                                id="first-name-input"
+                                value={firstName}
+                                onChange={(e) => setFirstName(e.target.value)}
+                                required
+                                disabled={loading}
+                            />
+                        </FormGroup>
+                        <FormGroup label="Last Name" labelFor="last-name-input">
+                            <InputGroup
+                                id="last-name-input"
+                                value={lastName}
+                                onChange={(e) => setLastName(e.target.value)}
+                                required
+                                disabled={loading}
+                            />
+                        </FormGroup>
                         <FormGroup label="Email" labelFor="email-input">
                             <InputGroup
                                 id="email-input"
@@ -74,6 +96,7 @@ export default function LoginRegister({ authenticationType, onLogin, onRegister,
                                 disabled={loading}
                             />
                         </FormGroup>
+                        </>
                     )}
                     <FormGroup label="Password" labelFor="password-input">
                         <InputGroup
@@ -88,7 +111,7 @@ export default function LoginRegister({ authenticationType, onLogin, onRegister,
                     {err && <p className="text-sm text-red-600 mb-2">{err}</p>}
                     <div className={`${Classes.DIALOG_FOOTER} flex justify-end gap-2`}>
                         <Button onClick={handleClose} disabled={loading}>Cancel</Button>
-                        <Button type="submit" intent="primary" loading={loading} disabled={loading || !username || !password || (active === "register" && !email)}>
+                        <Button type="submit" intent="primary" loading={loading} disabled={loading || !username || !password || (active === "register" && !email && !firstName && !lastName)}>
                             {active === "login" ? "Login" : "Register"}
                         </Button>
                     </div>
