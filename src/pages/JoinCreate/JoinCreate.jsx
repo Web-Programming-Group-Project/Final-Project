@@ -3,39 +3,34 @@ import { useEffect, useMemo, useState } from 'react';
 import { useAppContext } from "../../AppContext";
 import Header from "../../components/Header";
 import { useNavigate } from "react-router-dom";
+import CreateMeeting from "../../components/create-meeting";
 
 //Page with join and create meeting functionality
 //Accesses the list of meetings (for join functionality) Data structure for weekly report
 //Accesses the MeetingSettings page (for create functionality)
 
-//Fill the meeting list with data from the database
-
-/*
-function displayMeetings(){
-	
-}
-*/
-
 export default function JoinCreate() {
   const [meetingList, setMeetingList] = useState([]);
-
+  const [showCreate, setShowCreate] = useState(null);
   const { user } = useAppContext();
   const navigate = useNavigate(); 
-  const activeMeetings = 0;//Stores the number of active meetings
+  
+  //take data from the database
+  //use setMeetingList to update with the list of meetings in the database
 
-  function testJoin(){
-    //navigate("/Meetings");
+  async function testJoin(){
+    navigate("/Meetings");
     console.log(meetingList);
   }
 
-  function testAdd(){
+  async function testAdd(meetingName, listMembers){
     setMeetingList(
         [
             ...meetingList,
-            { id: meetingList.length, name: "Test" } // The id will be the number next available, the name can be anything
+            { id: meetingList.length, name: meetingName, members: listMembers } // The id will be the number next available, the name can be anything
         ]
         );
-    //navigate("/MeetingSeetings");
+    //navigate("/MeetingSettings");
   }
   
   return (
@@ -55,7 +50,7 @@ export default function JoinCreate() {
           <tbody id="meeting-list">
             {meetingList.map((meeting) => (
             <tr key={meeting.id} >
-              <td>Meeting Number {meeting.id} {meeting.name}</td>
+              <td>{meeting.name}</td>
             </tr>
           ))}
           </tbody>
@@ -64,7 +59,7 @@ export default function JoinCreate() {
           <button
             className="LargeButton"
             id = "Creator"
-            onClick={testAdd}
+            onClick={() => setShowCreate("active")}
           >
           Create Meeting
           </button>
@@ -77,6 +72,7 @@ export default function JoinCreate() {
           </button>
         </div>
       </div>
+      {showCreate && ( <CreateMeeting isOpen onClose={() => setShowCreate(null)} onCreate={testAdd} />) }
     </>
   );
 }

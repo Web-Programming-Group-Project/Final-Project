@@ -82,8 +82,8 @@ html, body, #root { height: 100%; margin: 0; padding: 0; }
 }
 
 .meeting-table td {
-  padding: 0.75rem 25rem;
-  text-align: right;
+  padding: 0.75rem 5rem;
+  text-align: left;
   color: #000;
   border-bottom: 1px solid #e5ecf5;
   vertical-align: right;
