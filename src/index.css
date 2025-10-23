@@ -26,4 +26,74 @@ html, body, #root { height: 100%; margin: 0; padding: 0; }
   font-style: normal;
   font-weight: 400;
   line-height: normal;
+  border-radius: 12px 12px 12px 12px;
+}
+
+.button-section {
+  margin: 1.75rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-bottom: 1.25rem;
+  justify-content: flex-start;
+  gap: 10rem;
+}
+.page-divider {
+  display: flex;
+  align-items: space-evenly;
+  margin-bottom: 1.25rem;
+  justify-content: space-between;
+}
+
+.panel-header {
+  display: flex;
+  align-items: right;
+  gap: 1.5rem;
+  margin-bottom: 1.25rem;
+  justify-content: space-between;
+}
+.panel-header h2 {
+  align-items: right;
+  padding: 0rem 10.4rem;
+  margin: 0rem;
+  font-size: 5rem;
+  font-family: Slate;
+}
+
+.meeting-table {
+  display: flex;
+  flex-direction: column;
+  border-collapse: collapse;
+  border-spacing: 0;
+}
+
+.meeting-table thead {
+  background: #00A6FB;
+  border-radius: 12px 12px 0 0;
+}
+
+.meeting-table th {
+  padding: 0.75rem 25rem;
+  text-align: right;
+  color: #FFF;
+  border-bottom: 1px solid #e5ecf5;
+  vertical-align: right;
+  font-size: 2.5rem;
+}
+
+.meeting-table td {
+  padding: 0.75rem 5rem;
+  text-align: left;
+  color: #000;
+  border-bottom: 1px solid #e5ecf5;
+  vertical-align: right;
+  font-size: 2.5rem;
+}
+
+.meeting-table tbody {
+  background: #e5ecf5;
+  border-radius: 0 0 12px 12px;
+}
+.meeting-table tbody tr:hover {
+  background: #f8fbff;
 }
