@@ -21,16 +21,26 @@ export default function User() {
       <div className="panel-header">
         <h2 id="meeting-heading">Convo</h2>
         <div className="user-section">
-            <h2 id="convo-heading">[USERS NAME]</h2>
-            <img src="" alt="Profile Picture"/>
+            <span class="position-relative">
+                <h2 id="convo-heading">[USERS NAME]</h2>
+                  <button
+                    className="SmallButton"
+                    id = "ChangeName"
+                  >
+                  Change Name
+                </button>
+            </span>
+            <span class="position-relative">
+                <img src="" alt="Profile Picture"/>
+                <button
+                    className="SmallButton"
+                    id = "ChangeProfile"
+                >
+                Change Profile Picture
+                </button>
+            </span>
         </div>
       </div>
-      <button
-            className="SmallButton"
-            id = "ChangeName"
-          >
-          Change Name
-        </button>
       <div className="page-divider">
         
       </div>
@@ -39,7 +49,7 @@ export default function User() {
       <p>User's bio (This can be removed if we can't implement this')</p>
       <p>User's list of meetings (This can be removed if we can't implement this')</p>
       <button
-            className="SmallButton"
+            className="MediumButton"
             id = "CreateJoin"
             onClick={goToCreateJoin}
           >

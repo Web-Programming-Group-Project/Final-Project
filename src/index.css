@@ -29,6 +29,48 @@ html, body, #root { height: 100%; margin: 0; padding: 0; }
   border-radius: 12px 12px 12px 12px;
 }
 
+.MediumButton {
+  width: 240px;
+  height: 60px;
+  flex-shrink: 0;
+  background-color: #00A6FB;
+  color: #FFF;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  font-family: Inter;
+  font-size: 21px;
+  font-style: normal;
+  font-weight: 400;
+  line-height: normal;
+  border-radius: 12px 12px 12px 12px;
+}
+
+.SmallButton {
+  width: 120px;
+  height: 30px;
+  flex-shrink: 0;
+  background-color: #00A6FB;
+  color: #FFF;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  font-family: Inter;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 400;
+  line-height: normal;
+  border-radius: 12px 12px 12px 12px;
+}
+
+#changeName {
+  width: 2400px;
+  height: 60px;
+}
+
+.user-section {
+  display: flex;
+}
 .button-section {
   margin: 1.75rem;
   display: flex;
