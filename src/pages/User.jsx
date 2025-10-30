@@ -21,8 +21,9 @@ export default function User() {
       <div className="panel-header">
         <h2 id="meeting-heading">Convo</h2>
         <div className="user-section">
-            <span class="position-relative">
-                <h2 id="convo-heading">[USERS NAME]</h2>
+            <span className="name-section">
+                <h2 id="convo-heading">{user.firstName} {user.lastName}</h2>
+                <p id="username">{user.username}</p>
                   <button
                     className="SmallButton"
                     id = "ChangeName"
@@ -30,7 +31,7 @@ export default function User() {
                   Change Name
                 </button>
             </span>
-            <span class="position-relative">
+            <span className="picture-section">
                 <img src="" alt="Profile Picture"/>
                 <button
                     className="SmallButton"
