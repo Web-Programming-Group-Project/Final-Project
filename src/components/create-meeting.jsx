@@ -8,15 +8,16 @@ import {
 } from "@blueprintjs/core";
 import { useState } from "react";
 
+
 export default function CreateMeeting({ onCreate, isOpen, onClose }) {
-    const [name, setName] = useState(""); //Stores the name of the meeting
-    const [members, setMembers] = useState([]); //Stores an array of the members of the meeting
-    const [loading, setLoading] = useState(false); //Present to account for loading list of users, and other connections to MongoDB
-    const [err, setErr] = useState(""); //Used for returning specific error messages
+    const [name, setName] = useState("");
+    const [isOpenMeeting, setIsOpenMeeting] = useState(true); // true=open, false=closed
+    const [loading, setLoading] = useState(false);
+    const [err, setErr] = useState("");
 
     const reset = () => {
         setName("");
-        setMembers([]);
+        setIsOpenMeeting(true);
     }
 
     const handleClose = () => {
@@ -29,7 +30,7 @@ export default function CreateMeeting({ onCreate, isOpen, onClose }) {
         e.preventDefault();
         setLoading(true);
         try {
-            await onCreate(name.trim(), members);
+            await onCreate(name.trim(), isOpenMeeting);
             reset();
             requestAnimationFrame(() => onClose());
         } catch (error) {
@@ -56,20 +57,32 @@ export default function CreateMeeting({ onCreate, isOpen, onClose }) {
                             disabled={loading}
                         />
                     </FormGroup>
-                    <FormGroup label="Add Members" labelFor="members-input">
-                        <InputGroup
-                            id="members-input"
-                            //type="password"
-                            value={members}
-                            //onChange={(e) => dropdown-checkbox, or option for multiple inputs, this needs to be a list}
-                            //required
-                            disabled={loading}
-                        />
+                    <FormGroup label="Meeting Type" labelFor="open-toggle">
+                        <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
+                            <Button
+                                active={isOpenMeeting}
+                                intent={isOpenMeeting ? "primary" : "none"}
+                                onClick={() => setIsOpenMeeting(true)}
+                                type="button"
+                                disabled={loading}
+                            >
+                                Open
+                            </Button>
+                            <Button
+                                active={!isOpenMeeting}
+                                intent={!isOpenMeeting ? "primary" : "none"}
+                                onClick={() => setIsOpenMeeting(false)}
+                                type="button"
+                                disabled={loading}
+                            >
+                                Closed
+                            </Button>
+                        </div>
                     </FormGroup>
                     {err && <p className="text-sm text-red-600 mb-2">{err}</p>}
                     <div className={`${Classes.DIALOG_FOOTER} flex justify-end gap-2`}>
                         <Button onClick={handleClose} disabled={loading}>Cancel</Button>
-                        <Button type="submit" intent="primary" loading={loading} disabled={loading || !name || !members}>
+                        <Button type="submit" intent="primary" loading={loading} disabled={loading || !name}>
                             Create Meeting
                         </Button>
                     </div>

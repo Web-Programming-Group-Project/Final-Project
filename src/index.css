@@ -105,10 +105,12 @@ html, body, #root { height: 100%; margin: 0; padding: 0; }
 }
 
 .meeting-table {
-  display: flex;
-  flex-direction: column;
+  width: 100%;
+  max-width: 900px;
+  margin: 0 auto;
   border-collapse: collapse;
   border-spacing: 0;
+  table-layout: auto;
 }
 
 .meeting-table thead {
@@ -117,27 +119,26 @@ html, body, #root { height: 100%; margin: 0; padding: 0; }
 }
 
 .meeting-table th {
-  padding: 0.75rem 25rem;
-  text-align: right;
+  padding: 0.75rem 2rem;
+  text-align: left;
   color: #FFF;
   border-bottom: 1px solid #e5ecf5;
-  vertical-align: right;
-  font-size: 2.5rem;
+  font-size: 2.2rem;
 }
 
 .meeting-table td {
-  padding: 0.75rem 5rem;
+  padding: 0.75rem 2rem;
   text-align: left;
   color: #000;
   border-bottom: 1px solid #e5ecf5;
-  vertical-align: right;
-  font-size: 2.5rem;
+  font-size: 2.2rem;
 }
 
 .meeting-table tbody {
   background: #e5ecf5;
   border-radius: 0 0 12px 12px;
 }
+
 .meeting-table tbody tr:hover {
   background: #f8fbff;
 }
