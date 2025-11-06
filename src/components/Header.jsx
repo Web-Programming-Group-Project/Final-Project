@@ -11,13 +11,16 @@ export default function Header() {
     navigate("/");
   }
 
+  function goToUserPage() {
+    navigate("/User");
+  } 
   return (
     <div className="h-10 bg-sky-700 flex items-center justify-between px-4 text-white">
         {user ? <span className="font-semibold">Convo</span> : null}
 
         {user ? (
             <div className="flex items-center gap-4">
-            <span>{user.firstName} {user.lastName}</span>
+            <button className="bg-sky-700 hover:bg-sky-600 text-white px-3 py-1 rounded-md text-sm transition-colors" onClick={goToUserPage}>{user.firstName} {user.lastName}</button>
             <button
                 onClick={handleSignOut}
                 className="bg-sky-700 hover:bg-sky-600 text-white px-3 py-1 rounded-md text-sm transition-colors"
