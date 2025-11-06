@@ -5,15 +5,27 @@ import React from "react";
 import { useEffect, useMemo, useState } from 'react';
 import { useAppContext } from "../AppContext";
 import Header from "../components/Header";
+import { updateUser } from "../api";
 import { useNavigate } from "react-router-dom";
+import ChangeName from "../components/change-name";
 
 export default function User() {
-  const { user } = useAppContext();
-  const navigate = useNavigate(); 
+  const { user, setUser } = useAppContext();
+  const navigate = useNavigate();
+  const [showChange, setShowChange] = useState(null); 
   
-  async function goToCreateJoin() {
+  async function goToCreateJoin() { //This (and the button )should always be active
         navigate("/JoinCreate");
     }
+
+    //Function to change name
+  async function handleNameChange(firstName, lastName) {
+        const data = await updateUser({ firstName, lastName });
+        if (!data?.user) throw new Error(data?.message || "Registration failed");
+        setUser(data.user);
+        setShowChange(null);
+    }
+    //Function to change profile picture
 
   return (
     <>
@@ -27,6 +39,7 @@ export default function User() {
                   <button
                     className="SmallButton"
                     id = "ChangeName"
+                    onClick={() => setShowChange("active")}
                   >
                   Change Name
                 </button>
@@ -56,6 +69,7 @@ export default function User() {
           >
           Create/Join Meeting
       </button>
+      {showChange && ( <ChangeName isOpen onClose={() => setShowChange(null)} onChange={handleNameChange} />) }
     </>
   );
 }
