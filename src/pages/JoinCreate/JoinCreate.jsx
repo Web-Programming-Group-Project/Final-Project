@@ -5,6 +5,11 @@ import Header from "../../components/Header";
 import { useNavigate } from "react-router-dom";
 import CreateMeeting from "../../components/create-meeting";
 
+// Helper to generate a short random code (6 alphanumeric chars)
+function generateMeetingCode() {
+  return Math.random().toString(36).substring(2, 8).toUpperCase();
+}
+
 //Page with join and create meeting functionality
 //Accesses the list of meetings (for join functionality) Data structure for weekly report
 //Accesses the MeetingSettings page (for create functionality)
@@ -13,24 +18,41 @@ export default function JoinCreate() {
   const [meetingList, setMeetingList] = useState([]);
   const [showCreate, setShowCreate] = useState(null);
   const { user } = useAppContext();
-  const navigate = useNavigate(); 
+  const navigate = useNavigate();
   
   //take data from the database
   //use setMeetingList to update with the list of meetings in the database
 
-  async function testJoin(){
-    navigate("/Meetings");
-    console.log(meetingList);
+
+  async function testJoin() {
+    const code = window.prompt("Enter meeting code to join:");
+    if (!code) return;
+    const found = meetingList.find(m => m.code === code.trim().toUpperCase());
+    if (found) {
+      navigate("/Meetings", { state: { meeting: found } });
+    } else {
+      window.alert("No meeting found with that code.");
+    }
   }
 
-  async function testAdd(meetingName, listMembers){
-    setMeetingList(
-        [
-            ...meetingList,
-            { id: meetingList.length, name: meetingName, members: listMembers } // The id will be the number next available, the name can be anything
-        ]
-        );
-    //navigate("/MeetingSettings");
+  async function testAdd(meetingName, isOpenMeeting) {
+    const code = generateMeetingCode();
+    const userId = user?.username || user?.email || "anon";
+    // Remove any previous meeting by this user
+    const filtered = meetingList.filter(m => m.creatorId !== userId);
+    const newMeeting = {
+      id: filtered.length, // id should be the next index
+      name: meetingName,
+      code,
+      isOpen: isOpenMeeting,
+      creatorId: userId
+    };
+    const updatedList = [...filtered, newMeeting];
+    // Reassign ids to ensure uniqueness and order
+    const reIdList = updatedList.map((m, idx) => ({ ...m, id: idx }));
+    setMeetingList(reIdList);
+    setShowCreate(null);
+    // No auto-navigation; creator must join via code like others
   }
   
   return (
@@ -45,14 +67,29 @@ export default function JoinCreate() {
           <thead>
             <tr>
               <th scope="col">Meeting Name</th>
+              <th scope="col">Code</th>
             </tr>
           </thead>
           <tbody id="meeting-list">
-            {meetingList.map((meeting) => (
-            <tr key={meeting.id} >
-              <td>{meeting.name}</td>
-            </tr>
-          ))}
+            {meetingList.map((meeting) => {
+              const isCreator = meeting.creatorId === (user?.username || user?.email || "anon");
+              return (
+                <tr
+                  key={meeting.id}
+                  style={isCreator ? { cursor: "pointer", background: "#e0f3ff" } : {}}
+                  title={isCreator ? "Click to join your meeting" : undefined}
+                  onClick={isCreator ? () => navigate("/Meetings", { state: { meeting } }) : undefined}
+                >
+                  <td>{meeting.name}</td>
+                  <td>
+                    {meeting.isOpen
+                      ? <code>{meeting.code}</code>
+                      : <span style={{ color: '#888', fontStyle: 'italic' }}>Closed</span>
+                    }
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
         <div className="button-section">

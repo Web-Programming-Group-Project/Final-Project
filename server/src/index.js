@@ -3,7 +3,7 @@ const mongoose = require("mongoose");
 const dotenv = require("dotenv");
 const cors = require("cors");
 const User = require("./models/User");
-const Meeting = require("./models/Meeting");
+
 
 // Gets the .env variables
 dotenv.config();
@@ -74,26 +74,7 @@ app.post("/api/login", async (req, res) => {
   res.json({ message: "Login successful", user });
 });
 
-// POST /api/create
-app.post("/api/create", async (req, res) => {
-  const { name } = req.body;
 
-  if (!name) {
-    return res.status(400).json({ message: "Meeting name is required" });
-  }
-
-  try {
-    const meeting = new Meeting({ name }); 
-    await meeting.save();
-    res.json({ message: "Meeting created successfully", meeting });
-  } catch (err) {
-    if (err.code === 11000) { 
-      const duplicateField = Object.keys(err.keyPattern)[0];
-      return res.status(400).json({ message: `${duplicateField} already exists` });
-    }
-    res.status(500).json({ message: "Error creating meeting", error: err.message });
-  }
-});
 
 // start server
 const PORT = process.env.PORT || 8080;
