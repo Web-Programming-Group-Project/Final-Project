@@ -76,4 +76,6 @@ app.post("/login", async (req, res) => {
   res.json({ message: "Login successful", user });
 });
 
-module.exports.handler = serverless(app);
+module.exports.handler = serverless(app, {
+  basePath: "/.netlify/functions/api",
+});
