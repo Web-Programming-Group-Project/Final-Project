@@ -1,33 +1,34 @@
 // netlify/functions/api.js
-import serverless from "serverless-http";
-import express from "express";
-import mongoose from "mongoose";
-import dotenv from "dotenv";
-import cors from "cors";
-import User from "../../src/models/User.js";
+const serverless = require("serverless-http");
+const express = require("express");
+const mongoose = require("mongoose");
+const dotenv = require("dotenv");
+const cors = require("cors");
+const User = require("../../src/models/User"); 
 
 dotenv.config();
 
 const app = express();
 app.use(express.json());
 
-// Optional: keep during dev if FE and API are on different origins
 app.use(cors({
   origin: "*",
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
 }));
 
-// ----- Reuse a single Mongo connection across invocations -----
+// ----- Reuse a single Mongo connection -----
 let conn = null;
 async function connectDB() {
   if (conn) return conn;
-  conn = mongoose.connect(process.env.MONGODB_URI).then((m) => {
-    console.log("Mongo connected");
-    return m;
-  }).catch((err) => {
-    console.error("Mongo connection error:", err);
-    throw err;
-  });
+  conn = mongoose.connect(process.env.MONGODB_URI)
+    .then((m) => {
+      console.log("Mongo connected");
+      return m;
+    })
+    .catch((err) => {
+      console.error("Mongo connection error:", err);
+      throw err;
+    });
   return conn;
 }
 
@@ -40,7 +41,7 @@ app.use(async (req, res, next) => {
   }
 });
 
-// ----- Routes (NO /api prefix here) -----
+// Routes
 app.get("/ping", (req, res) => res.send("pong"));
 
 app.post("/register", async (req, res) => {
@@ -75,6 +76,4 @@ app.post("/login", async (req, res) => {
   res.json({ message: "Login successful", user });
 });
 
-export const handler = serverless(app, {
-  basePath: "/.netlify/functions/api",
-});
+module.exports.handler = serverless(app);
