@@ -8,12 +8,18 @@ import Header from "../components/Header";
 import { updateUser } from "../api";
 import { useNavigate } from "react-router-dom";
 import ChangeName from "../components/change-name";
+import ChangeBio from "../components/change-bio"
+import ChangePronouns from "../components/change-pronouns"
 
 export default function User() {
   const { user, setUser } = useAppContext();
   const [ username, setUsername ] = useState("");
   const navigate = useNavigate();
-  const [showChange, setShowChange] = useState(null); 
+  const [showChange, setShowChange] = useState(null);
+  const [showBio, setShowBio] = useState(null);  
+  const [showPronouns, setShowPronouns] = useState(null); 
+  const [biography, setBiography] = useState("");//TEMPORARY, UNTIL WE CAN STORE BIOS WITH USERS
+  const [pronouns, setPronouns] = useState("");//TEMPORARY, UNTIL WE CAN STORE BIOS, PRONOUNS AND MEETINGS WITH USERS
   
   async function goToCreateJoin() { //This (and the button )should always be active
         navigate("/JoinCreate");
@@ -27,7 +33,22 @@ export default function User() {
         setShowChange(null);
     }
     //Function to change profile picture
-
+  //Function to change bio
+  async function handleBioChange(bio) {
+        //const data = await updateUser({ username, firstName, lastName });
+        //if (!data?.user) throw new Error(data?.message || "User update failed");
+        //setUser(data.user);
+        setBiography(bio);
+        setShowBio(null);
+  }
+  //Function to change pronouns
+  async function handlePronounChange(pronoun) {
+        //const data = await updateUser({ username, firstName, lastName });
+        //if (!data?.user) throw new Error(data?.message || "User update failed");
+        //setUser(data.user);
+        setPronouns(pronoun);
+        setShowPronouns(null);
+  }
   return (
     <>
       <Header />
@@ -63,9 +84,18 @@ export default function User() {
         
       </div>
       <span className="profile-section">
-        <p>User's pronouns (This can be removed if we can't implement this')</p>
-        <p>User's list of meetings (This can be removed if we can't implement this')</p>
-        <p>User's bio (This can be removed if we can't implement this')</p>
+        <p onClick={() => {
+                      setShowPronouns("active");
+                      setUsername(user.username);
+          }}>{pronouns} (Should be stored with the user, like firstname, etc)
+        </p>
+        <p>User's list of meetings (Should be stored with the user, like firstname, etc)</p>
+        <p onClick={() => {
+                      setShowBio("active");
+                      setUsername(user.username);
+        }}>
+          {biography} (Should be stored with the user, like firstname, etc)
+        </p>
         <button
               className="MediumButton"
               id = "CreateJoin"
@@ -75,6 +105,8 @@ export default function User() {
         </button>
       </span>
       {showChange && ( <ChangeName isOpen onClose={() => setShowChange(null)} onChange={handleNameChange} />) }
+      {showBio && ( <ChangeBio isOpen onClose={() => setShowBio(null)} onChange={handleBioChange} />) }
+      {showPronouns && ( <ChangePronouns isOpen onClose={() => setShowPronouns(null)} onChange={handlePronounChange} />) }
     </>
   );
 }
