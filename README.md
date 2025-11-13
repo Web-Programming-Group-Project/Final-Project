@@ -1,20 +1,17 @@
 # Final-Project
 Web Programming Final Project
 
-# Set Up Steps
-1. Make sure npm is installed
-2. clone repository
-3. Run `npm install` in terminal to download packages
-5. `cd` into the server directory 
-6. Create a .env file and copy and paste this code into it:
-    ```
-    PORT=8080
-    MONGODB_URI=mongodb+srv://convo_db_user:POkT9iC7EiEE1rcw@cluster0.bpzjy1i.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0
-    JWT_SECRET=Yk+KJtpuSU0CfyjPzrNW2cL9XQm/JZxDKQ38bBdDuhM=
-    CORS_ORIGIN=http://localhost:5173
-    COOKIE_SECURE=false 
-    ```
-6. Run `npm install` in terminal to download server specific packages
-7. Run `make dev` in the project root directory to locally host web app 
-8. Run `make stop` to stop hosting the web app
-    - Note: The two commands above are from the Makefile and are a short cut for running npm run dev twice in two different directories
+# Local Development
+1. Install dependencies: `npm install`.
+2. Create a `.env` file in the project root and add your Mongo connection string:
+   ```
+   MONGODB_URI=mongodb+srv://convo_db_user:POkT9iC7EiEE1rcw@cluster0.bpzjy1i.mongodb.net/retryWrites=true&w=majority&appName=Cluster0
+   ```
+   (The same variable must be configured in Netlify’s environment settings before deploying.)
+3. Start the unified frontend + API dev server: `npm run dev`.  
+   Netlify Dev will serve the Vite app and proxy the serverless API at `http://localhost:8888/.netlify/functions/api/*`.
+4. Visit `http://localhost:8888` in your browser for the full experience. Press `Ctrl+C` to stop.
+
+# Build
+- `npm run build` – generate the production bundle in `dist/`.
+- `npm run preview` – preview the built app locally.
