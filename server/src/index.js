@@ -74,6 +74,21 @@ app.post("/api/login", async (req, res) => {
   res.json({ message: "Login successful", user });
 });
 
+// PUT /api/update
+app.put("/api/update", async (req, res) => {
+  const { username, firstName, lastName } = req.body;
+
+  if (!firstName || !lastName) {
+    return res.status(400).json({ message: "Both first name and last name are required" });
+  }
+
+  const user = await User.findOne({ username });
+  user.firstName = firstName;
+  user.lastName = lastName;
+  await user.save();
+  res.json({ message: "Name change successful", user});
+});
+
 
 
 // start server
