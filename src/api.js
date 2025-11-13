@@ -23,11 +23,11 @@ export async function loginUser({ username, password }) {
   return data;
 }
 //For allowing the user to update their name
-export async function updateUser({ firstName, lastName }) {
+export async function updateUser({ username, firstName, lastName }) {
   const res = await fetch(`${API_BASE}/update`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ firstName, lastName }),
+    body: JSON.stringify({ username, firstName, lastName }),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.message || "Name update failed");

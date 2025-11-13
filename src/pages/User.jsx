@@ -11,6 +11,7 @@ import ChangeName from "../components/change-name";
 
 export default function User() {
   const { user, setUser } = useAppContext();
+  const [ username, setUsername ] = useState("");
   const navigate = useNavigate();
   const [showChange, setShowChange] = useState(null); 
   
@@ -19,9 +20,9 @@ export default function User() {
     }
 
     //Function to change name
-  async function handleNameChange(firstName, lastName) {
-        const data = await updateUser({ firstName, lastName });
-        if (!data?.user) throw new Error(data?.message || "Registration failed");
+  async function handleNameChange( firstName, lastName) {
+        const data = await updateUser({ username, firstName, lastName });
+        if (!data?.user) throw new Error(data?.message || "User update failed");
         setUser(data.user);
         setShowChange(null);
     }
@@ -39,13 +40,16 @@ export default function User() {
                   <button
                     className="SmallButton"
                     id = "ChangeName"
-                    onClick={() => setShowChange("active")}
+                    onClick={() => {
+                      setShowChange("active");
+                      setUsername(user.username);
+                    }}
                   >
                   Change Name
                 </button>
             </span>
             <span className="picture-section">
-                <img src="" alt="Profile Picture"/>
+                <img src="https://notion-emojis.s3-us-west-2.amazonaws.com/prod/svg-twitter/1f310.svg" alt="Profile Picture"/>
                 <button
                     className="SmallButton"
                     id = "ChangeProfile"
@@ -58,17 +62,18 @@ export default function User() {
       <div className="page-divider">
         
       </div>
- 
-      <p>User's pronouns (This can be removed if we can't implement this')</p>
-      <p>User's bio (This can be removed if we can't implement this')</p>
-      <p>User's list of meetings (This can be removed if we can't implement this')</p>
-      <button
-            className="MediumButton"
-            id = "CreateJoin"
-            onClick={goToCreateJoin}
-          >
-          Create/Join Meeting
-      </button>
+      <span className="profile-section">
+        <p>User's pronouns (This can be removed if we can't implement this')</p>
+        <p>User's list of meetings (This can be removed if we can't implement this')</p>
+        <p>User's bio (This can be removed if we can't implement this')</p>
+        <button
+              className="MediumButton"
+              id = "CreateJoin"
+              onClick={goToCreateJoin}
+            >
+            Create/Join Meeting
+        </button>
+      </span>
       {showChange && ( <ChangeName isOpen onClose={() => setShowChange(null)} onChange={handleNameChange} />) }
     </>
   );
