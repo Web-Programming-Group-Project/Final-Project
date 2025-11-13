@@ -1,8 +1,8 @@
-const express = require("express");
-const mongoose = require("mongoose");
-const dotenv = require("dotenv");
-const cors = require("cors");
-const User = require("./models/User");
+import express from "express";
+import mongoose from "mongoose";
+import dotenv from "dotenv";
+import cors from "cors";
+import User from "../../src/models/User.js";
 
 
 // Gets the .env variables

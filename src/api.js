@@ -1,5 +1,4 @@
-// Will need to update below when deloying 
-const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8080/api";
+const API_BASE = import.meta.env.VITE_API_BASE ?? "/.netlify/functions/api";
 
 export async function registerUser({ username, email, password, firstName, lastName }) {
   const res = await fetch(`${API_BASE}/register`, {
