@@ -76,6 +76,32 @@ app.post("/login", async (req, res) => {
   res.json({ message: "Login successful", user });
 });
 
+// PUT /update
+app.put("/update", async (req, res) => {
+  const { username, firstName, lastName } = req.body;
+
+  if (!firstName || !lastName) {
+    return res.status(400).json({ message: "Both first name and last name are required" });
+  }
+
+  const user = await User.findOne({ username });
+  user.firstName = firstName;
+  user.lastName = lastName;
+  await user.save();
+  res.json({ message: "Name change successful", user});
+});
+
+// PUT /update/bio
+app.put("/update/bio", async (req, res) => {
+  const { username, bio} = req.body;
+
+  const user = await User.findOne({ username });
+  user.bio = bio;
+  await user.save();
+  res.json({ message: "Bio updated successfully", user});
+});
+
+
 module.exports.handler = serverless(app, {
   basePath: "/.netlify/functions/api",
 });
