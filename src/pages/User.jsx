@@ -90,7 +90,35 @@ export default function User() {
           }}>{pronouns} (Should be stored with the user, like firstname, etc)
         </p>
         <div>
-            <p>User's list of meetings (Should be stored with the user, like firstname, etc)</p>
+            <table className="meeting-table" id="meetingTable">
+                <thead>
+                    <tr>
+                      <th scope="col">Meeting Name</th>
+                      <th scope="col">Code</th>
+                    </tr>
+                </thead>
+                <tbody id="meeting-list">
+                    {meetingList.map((meeting) => {
+                      const isCreator = meeting.creatorId === (user?.username || user?.email || "anon");
+                      return (
+                        <tr
+                          key={meeting.id}
+                          style={isCreator ? { cursor: "pointer", background: "#e0f3ff" } : {}}
+                          title={isCreator ? "Click to join your meeting" : undefined}
+                          onClick={isCreator ? () => navigate("/Meetings", { state: { meeting } }) : undefined}
+                        >
+                          <td>{meeting.name}</td>
+                          <td>
+                            {meeting.isOpen
+                              ? <code>{meeting.code}</code>
+                              : <span style={{ color: '#888', fontStyle: 'italic' }}>Closed</span>
+                            }
+                          </td>
+                        </tr>
+                      );
+                    })}
+                </tbody>
+            </table>
             <button
               className="MediumButton"
               id = "CreateJoin"
