@@ -89,20 +89,22 @@ export default function User() {
                       setUsername(user.username);
           }}>{pronouns} (Should be stored with the user, like firstname, etc)
         </p>
-        <p>User's list of meetings (Should be stored with the user, like firstname, etc)</p>
+        <div>
+            <p>User's list of meetings (Should be stored with the user, like firstname, etc)</p>
+            <button
+              className="MediumButton"
+              id = "CreateJoin"
+              onClick={goToCreateJoin}
+            >
+            Create/Join Meeting
+            </button>
+        </div>
         <p className="profile-text" onClick={() => {
                       setShowBio("active");
                       setUsername(user.username);
         }}>
           {biography} (Should be stored with the user, like firstname, etc)
         </p>
-        <button
-              className="MediumButton"
-              id = "CreateJoin"
-              onClick={goToCreateJoin}
-            >
-            Create/Join Meeting
-        </button>
       </span>
       {showChange && ( <ChangeName isOpen onClose={() => setShowChange(null)} onChange={handleNameChange} />) }
       {showBio && ( <ChangeBio isOpen onClose={() => setShowBio(null)} onChange={handleBioChange} />) }
