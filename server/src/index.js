@@ -89,6 +89,15 @@ app.put("/api/update", async (req, res) => {
   res.json({ message: "Name change successful", user});
 });
 
+// PUT /api/update/bio
+app.put("/api/update/bio", async (req, res) => {
+  const { username, bio} = req.body;
+
+  const user = await User.findOne({ username });
+  user.bio = bio;
+  await user.save();
+  res.json({ message: "Bio updated successfully", user});
+});
 
 
 // start server
