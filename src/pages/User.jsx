@@ -84,13 +84,13 @@ export default function User() {
         
       </div>
       <span className="profile-section">
-        <p onClick={() => {
+        <p className="profile-text" onClick={() => {
                       setShowPronouns("active");
                       setUsername(user.username);
           }}>{pronouns} (Should be stored with the user, like firstname, etc)
         </p>
         <p>User's list of meetings (Should be stored with the user, like firstname, etc)</p>
-        <p onClick={() => {
+        <p className="profile-text" onClick={() => {
                       setShowBio("active");
                       setUsername(user.username);
         }}>
