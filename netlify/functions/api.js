@@ -101,6 +101,16 @@ app.put("/update/bio", async (req, res) => {
   res.json({ message: "Bio updated successfully", user});
 });
 
+// PUT /update/meetings
+app.put("/update/meetings", async (req, res) => {
+  const { username, meeting} = req.body;
+
+  const user = await User.findOne({ username });
+  user.meetings.push(meeting);
+  await user.save();
+  res.json({ message: "Meeting added successfully", user});
+  console.log("MEETING ADDED");
+});
 
 module.exports.handler = serverless(app, {
   basePath: "/.netlify/functions/api",

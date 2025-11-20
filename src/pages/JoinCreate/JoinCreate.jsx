@@ -53,6 +53,8 @@ export default function JoinCreate() {
     setMeetingList(reIdList);
     setShowCreate(null);
     // No auto-navigation; creator must join via code like others
+    //Adds the meeting to a list stored with the user, since they are the creator.
+    await updateMeeting({ username, newMeeting });
   }
   
   return (

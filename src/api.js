@@ -32,3 +32,15 @@ export async function updateUser({ username, firstName, lastName }) {
   if (!res.ok) throw new Error(data.message || "Name update failed");
   return data;
 }
+
+//For allowing the meetings to be associated with users
+export async function updateMeeting({ username, meeting }) {
+  const res = await fetch(`${API_BASE}/update/meetings`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, meeting }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.message || "Meeting add failed");
+  return data;
+}
