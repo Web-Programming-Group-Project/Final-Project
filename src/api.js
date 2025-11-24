@@ -33,8 +33,10 @@ export async function updateUser({ firstName, lastName }) {
   return data;
 }
 
-export async function listMeetings({ username }) {
-  const res = await fetch(`${API_BASE}/meetings?username=${encodeURIComponent(username)}`);
+export async function listMeetings({ username, view = "my" }) {
+  const params = new URLSearchParams({ username });
+  if (view && view !== "my") params.set("view", view);
+  const res = await fetch(`${API_BASE}/meetings?${params.toString()}`);
   if (!res.ok) throw new Error("Failed to list meetings");
   return res.json(); // { meetings }
 }

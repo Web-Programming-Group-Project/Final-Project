@@ -112,13 +112,39 @@ app.post("/meetings", async (req, res) => {
 
 app.get("/meetings", async (req, res) => {
   const username = (req.query.username || "").trim();
+  const view = (req.query.view || "my").toLowerCase();
   if (!username) return res.status(400).json({ message: "username required" });
 
-  const meetings = await Meeting.find(
-    { $or: [{ createdBy: username }, { "participants.username": username }] },
-    { title: 1, createdBy: 1, createdAt: 1, code: 1 }
-  ).sort({ createdAt: -1 });
-  res.json({ meetings });
+  try {
+    if (view === "recent") {
+      const meetings = await Meeting.find(
+        { $or: [{ createdBy: username }, { "participants.username": username }] },
+        { title: 1, createdBy: 1, code: 1, updatedAt: 1, participants: 1 }
+      )
+        .sort({ updatedAt: -1 })
+        .limit(10)
+        .lean();
+
+      const withOwner = meetings.map((meeting) => ({
+        ...meeting,
+        owner:
+          meeting.createdBy ||
+          (meeting.participants || []).find((p) => p.role === "chair")?.username ||
+          "Unknown",
+      }));
+
+      return res.json({ meetings: withOwner });
+    }
+
+    const meetings = await Meeting.find(
+      { $or: [{ createdBy: username }, { "participants.username": username }] },
+      { title: 1, createdBy: 1, createdAt: 1, code: 1 }
+    ).sort({ createdAt: -1 });
+    res.json({ meetings });
+  } catch (err) {
+    console.error("Error fetching meetings", err);
+    res.status(500).json({ message: "Error fetching meetings", error: err.message });
+  }
 });
 
 app.get("/meetings/:code", async (req, res) => {

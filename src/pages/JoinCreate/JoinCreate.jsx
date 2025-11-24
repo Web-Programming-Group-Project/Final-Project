@@ -15,29 +15,30 @@ import {
 //Accesses the MeetingSettings page (for create functionality)
 
 export default function JoinCreate() {
-  const [meetingList, setMeetingList] = useState([]);
+  const [meetings, setMeetings] = useState([]);
   const [showCreate, setShowCreate] = useState(null);
   const [loadingList, setLoadingList] = useState(true);
   const [listError, setListError] = useState("");
   const [copiedCode, setCopiedCode] = useState(null);
+  const [activeTab, setActiveTab] = useState("my");
   const { user } = useAppContext();
   const navigate = useNavigate();
   const username = user?.username || user?.email || "";
-  
+
   useEffect(() => {
     let cancelled = false;
     async function load() {
       if (!username) {
-        setMeetingList([]);
+        setMeetings([]);
         setLoadingList(false);
         return;
       }
       setLoadingList(true);
       setListError("");
       try {
-        const data = await listMeetings({ username });
+        const data = await listMeetings({ username, view: activeTab });
         if (!cancelled) {
-          setMeetingList(data.meetings || []);
+          setMeetings(data.meetings || []);
         }
       } catch (err) {
         console.error("Failed to load meetings", err);
@@ -50,17 +51,34 @@ export default function JoinCreate() {
     }
     load();
     return () => { cancelled = true; };
-  }, [username]);
+  }, [username, activeTab]);
 
-  async function refreshMeetings() {
+  useEffect(() => {
+    setCopiedCode(null);
+  }, [activeTab]);
+
+  async function refreshMeetings(view = activeTab) {
     if (!username) return;
-    try {
+    const targetView = view;
+    const affectsCurrentView = targetView === activeTab;
+    if (affectsCurrentView) {
+      setLoadingList(true);
       setListError("");
-      const data = await listMeetings({ username });
-      setMeetingList(data.meetings || []);
+    }
+    try {
+      const data = await listMeetings({ username, view: targetView });
+      if (targetView === activeTab) {
+        setMeetings(data.meetings || []);
+      }
     } catch (err) {
       console.error("Failed to refresh meetings", err);
-      setListError(err.message || "Failed to refresh meetings");
+      if (targetView === activeTab) {
+        setListError(err.message || "Failed to refresh meetings");
+      }
+    } finally {
+      if (targetView === activeTab) {
+        setLoadingList(false);
+      }
     }
   }
 
@@ -73,7 +91,7 @@ export default function JoinCreate() {
     }
     try {
       const meeting = await apiJoinMeeting({ code: code.trim(), username });
-      await refreshMeetings();
+      await refreshMeetings(activeTab);
       navigate("/Meetings", { state: { meeting, code: meeting?.code } });
     } catch (err) {
       console.error("Failed to join meeting", err);
@@ -90,7 +108,11 @@ export default function JoinCreate() {
       throw new Error("Title is required");
     }
     const meeting = await apiCreateMeeting({ title, username });
-    await refreshMeetings();
+    if (activeTab === "my") {
+      await refreshMeetings("my");
+    } else {
+      setActiveTab("my");
+    }
     return meeting;
   }
 
@@ -105,65 +127,158 @@ export default function JoinCreate() {
       window.alert("Failed to copy code. Please copy it manually.");
     }
   }
+
+  function handleRejoinMeeting(meeting) {
+    if (!meeting?.code) {
+      window.alert("Meeting code unavailable. Please join with the code manually.");
+      return;
+    }
+    navigate("/Meetings", { state: { meeting, code: meeting.code } });
+  }
   
   return (
     <>
       <Header />
-      <div className="panel-header">
-        <h2 id="meeting-heading">My Meetings</h2>
+      <div className="panel-header" style={{ alignItems: "center", gap: "1rem" }}>
+        <div style={{ display: "flex", gap: "0.5rem" }}>
+          <button
+            type="button"
+            style={{
+              padding: "6px 16px",
+              fontSize: "1rem",
+              background: activeTab === "my" ? "#0582CA" : "#f0f4f8",
+              color: activeTab === "my" ? "#fff" : "#0582CA",
+              border: "1px solid #0582CA",
+              borderRadius: 999,
+            }}
+            onClick={() => setActiveTab("my")}
+          >
+            My Meetings
+          </button>
+          <button
+            type="button"
+            style={{
+              padding: "6px 16px",
+              fontSize: "1rem",
+              background: activeTab === "recent" ? "#0582CA" : "#f0f4f8",
+              color: activeTab === "recent" ? "#fff" : "#0582CA",
+              border: "1px solid #0582CA",
+              borderRadius: 999,
+            }}
+            onClick={() => setActiveTab("recent")}
+          >
+            Recent Meetings
+          </button>
+        </div>
         <h2 id="convo-heading">Convo</h2>
       </div>
       <div className="page-divider">
-        <table className="meeting-table" id="meetingTable">
-          <thead>
-            <tr>
-              <th scope="col">Meeting Name</th>
-              <th scope="col">Code</th>
-              <th scope="col">Copy</th>
-            </tr>
-          </thead>
-          <tbody id="meeting-list">
-            {loadingList && (
+        {activeTab === "my" && (
+          <table className="meeting-table" id="meetingTable">
+            <thead>
               <tr>
-                <td colSpan={3} style={{ textAlign: "center", padding: "1rem" }}>
-                  Loading meetings...
-                </td>
+                <th scope="col">Meeting Name</th>
+                <th scope="col">Code</th>
+                <th scope="col">Copy</th>
               </tr>
-            )}
-            {!loadingList && meetingList.length === 0 && (
+            </thead>
+            <tbody id="meeting-list">
+              {loadingList && (
+                <tr>
+                  <td colSpan={3} style={{ textAlign: "center", padding: "1rem" }}>
+                    Loading meetings...
+                  </td>
+                </tr>
+              )}
+              {!loadingList && meetings.length === 0 && (
+                <tr>
+                  <td colSpan={3} style={{ textAlign: "center", padding: "1rem", color: "#666" }}>
+                    No meetings yet.
+                  </td>
+                </tr>
+              )}
+              {!loadingList && meetings.map((meeting) => (
+                <tr key={meeting._id || meeting.code || meeting.title}>
+                  <td>{meeting.title || meeting.name}</td>
+                  <td><code>{meeting.code || "—"}</code></td>
+                  <td>
+                    <button
+                      type="button"
+                      className="copy-code-button"
+                      style={{
+                        padding: "4px 10px",
+                        fontSize: "0.85rem",
+                        borderRadius: 6,
+                        border: "1px solid #0582CA",
+                        background: copiedCode === meeting.code ? "#0582CA" : "#fff",
+                        color: copiedCode === meeting.code ? "#fff" : "#0582CA",
+                        fontWeight: 600,
+                        cursor: "pointer",
+                      }}
+                      onClick={() => handleCopyCode(meeting.code)}
+                    >
+                      {copiedCode === meeting.code ? "Copied!" : "Copy Code"}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+
+        {activeTab === "recent" && (
+          <table className="meeting-table" id="recentMeetingTable">
+            <thead>
               <tr>
-                <td colSpan={3} style={{ textAlign: "center", padding: "1rem", color: "#666" }}>
-                  No meetings yet.
-                </td>
+                <th scope="col">Meeting Name</th>
+                <th scope="col">Owner</th>
+                <th scope="col">Rejoin</th>
               </tr>
-            )}
-            {meetingList.map((meeting) => (
-              <tr key={meeting._id || meeting.title}>
-                <td>{meeting.title || meeting.name}</td>
-                <td><code>{meeting.code || "—"}</code></td>
-                <td>
-                  <button
-                    type="button"
-                    className="copy-code-button"
-                    style={{
-                      padding: "4px 10px",
-                      fontSize: "0.85rem",
-                      borderRadius: 6,
-                      border: "1px solid #0582CA",
-                      background: copiedCode === meeting.code ? "#0582CA" : "#fff",
-                      color: copiedCode === meeting.code ? "#fff" : "#0582CA",
-                      fontWeight: 600,
-                      cursor: "pointer",
-                    }}
-                    onClick={() => handleCopyCode(meeting.code)}
-                  >
-                    {copiedCode === meeting.code ? "Copied!" : "Copy Code"}
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {loadingList && (
+                <tr>
+                  <td colSpan={3} style={{ textAlign: "center", padding: "1rem" }}>
+                    Loading meetings...
+                  </td>
+                </tr>
+              )}
+              {!loadingList && meetings.length === 0 && (
+                <tr>
+                  <td colSpan={3} style={{ textAlign: "center", padding: "1rem", color: "#666" }}>
+                    No recent meetings found.
+                  </td>
+                </tr>
+              )}
+              {!loadingList && meetings.map((meeting) => (
+                <tr key={meeting._id || meeting.code || meeting.title}>
+                  <td>{meeting.title || meeting.name}</td>
+                  <td>{meeting.owner || meeting.createdBy || "Unknown"}</td>
+                  <td>
+                    <button
+                      type="button"
+                      className="copy-code-button"
+                      style={{
+                        padding: "4px 12px",
+                        fontSize: "0.85rem",
+                        borderRadius: 6,
+                        border: "1px solid #0582CA",
+                        background: "#0582CA",
+                        color: "#fff",
+                        fontWeight: 600,
+                        cursor: "pointer",
+                      }}
+                      onClick={() => handleRejoinMeeting(meeting)}
+                    >
+                      Rejoin
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+
         <div className="button-section">
           <button
             className="LargeButton"
