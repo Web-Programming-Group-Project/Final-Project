@@ -42,6 +42,15 @@ const MotionSchema = new mongoose.Schema(
       down: { type: Number, default: 0 },
     },
     voterMap: { type: Map, of: String, default: {} }, // username -> 'up' | 'down'
+    votingMode: {
+      type: String,
+      enum: ["named", "anonymous"],
+      default: "named",
+    },
+    anonymousVotedUsers: {
+      type: [String],
+      default: [],
+    },
     status: { type: String, enum: ["open", "closed"], default: "open" },
     outcome: { type: String, enum: ["pending", "passed", "failed"], default: "pending" },
     closedAt: { type: Date, default: null },

@@ -250,10 +250,12 @@ app.post("/meetings/:code/motions", async (req, res) => {
   const rawDescription = (req.body?.motionDescription ?? req.body?.description ?? "").trim();
   const rawLegacyText = (req.body?.motionText ?? req.body?.text ?? "").trim();
   const motionTypeInput = req.body?.motionType ?? req.body?.type;
+  const votingModeInput = (req.body?.votingMode || "").toLowerCase();
 
   const motionType = motionTypeInput === "procedural" || motionTypeInput === "procedure" ? "procedure" : "standard";
   const requiredPercentage = motionType === "procedure" ? 66 : 50;
   const title = rawTitle || rawLegacyText;
+  const votingMode = votingModeInput === "anonymous" ? "anonymous" : "named";
 
   if (!username || !title) return res.status(400).json({ message: "username and motion title are required" });
 
@@ -270,6 +272,8 @@ app.post("/meetings/:code/motions", async (req, res) => {
     status: "open",
     outcome: "pending",
     votes: { up: 0, down: 0 },
+    votingMode,
+    anonymousVotedUsers: [],
   });
 
   const motion = mtg.motions[mtg.motions.length - 1];
@@ -293,13 +297,30 @@ app.post("/meetings/:code/motions/:motionId/vote", async (req, res) => {
     return res.status(400).json({ message: "Voting is closed for this motion." });
   }
 
-  const prev = motion.voterMap.get(username);
-  if (prev !== vote) {
-    if (prev === "up")   motion.votes.up--;
-    if (prev === "down") motion.votes.down--;
-    motion.voterMap.set(username, vote);
-    if (vote === "up")   motion.votes.up++;
-    if (vote === "down") motion.votes.down++;
+  const votingMode = motion.votingMode || "named";
+  if (votingMode === "anonymous") {
+    motion.anonymousVotedUsers = motion.anonymousVotedUsers || [];
+    if (motion.anonymousVotedUsers.includes(username)) {
+      return res.status(400).json({ message: "You have already voted on this motion." });
+    }
+    motion.anonymousVotedUsers.push(username);
+    if (vote === "up") {
+      motion.votes.up = (motion.votes?.up || 0) + 1;
+    } else if (vote === "down") {
+      motion.votes.down = (motion.votes?.down || 0) + 1;
+    }
+  } else {
+    if (!motion.voterMap) {
+      motion.voterMap = new Map();
+    }
+    const prev = motion.voterMap.get(username);
+    if (prev !== vote) {
+      if (prev === "up") motion.votes.up--;
+      if (prev === "down") motion.votes.down--;
+      motion.voterMap.set(username, vote);
+      if (vote === "up") motion.votes.up++;
+      if (vote === "down") motion.votes.down++;
+    }
   }
 
   await mtg.save();
@@ -351,7 +372,7 @@ async function closeMotionRoute(req, res) {
   motion.updatedAt = new Date();
 
   const displayTitle = motion.title || motion.text || "Untitled motion";
-  const summary = `${motion.type === "procedure" ? "Procedural motion" : "Motion"} "${displayTitle}" ${passed ? "PASSED" : "FAILED"} (${up} in favor, ${down} against; required ${required}%, got ${Math.round(yesPercentage)}%).`;
+  const summary = `${motion.type === "procedure" ? "Procedural motion" : "Motion"} "${displayTitle}" ${passed ? "PASSED" : "FAILED"} (${up} in favor, ${down} against; required ${required}%, got ${Math.round(yesPercentage)}% — ${ (motion.votingMode || "named") === "anonymous" ? "anonymous vote" : "named vote" }).`;
 
   mtg.messages.push({
     author: "System",

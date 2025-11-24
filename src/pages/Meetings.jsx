@@ -43,11 +43,13 @@ export default function Meetings() {
   const [roleUpdating, setRoleUpdating] = useState(null);
   const [roleError, setRoleError] = useState("");
   const [motionType, setMotionType] = useState("standard");
+  const [motionVotingMode, setMotionVotingMode] = useState("named");
   const [raiseModalOpen, setRaiseModalOpen] = useState(false);
   const [motionTitleInput, setMotionTitleInput] = useState("");
   const [motionDescriptionInput, setMotionDescriptionInput] = useState("");
   const [motionError, setMotionError] = useState("");
   const [raisingMotion, setRaisingMotion] = useState(false);
+  const [voterListExpanded, setVoterListExpanded] = useState({});
   const [replyTextMap, setReplyTextMap] = useState({});
   const [replyStanceMap, setReplyStanceMap] = useState({});
   const [replyErrorMap, setReplyErrorMap] = useState({});
@@ -147,6 +149,7 @@ export default function Meetings() {
     setMotionDescriptionInput("");
     setMotionError("");
     setMotionType("standard");
+    setMotionVotingMode("named");
     setRaiseModalOpen(true);
   }
 
@@ -177,6 +180,7 @@ export default function Meetings() {
         title,
         description,
         type: motionType,
+        votingMode: motionVotingMode,
       });
       setMeeting((prev) => {
         if (!prev) return prev;
@@ -186,6 +190,7 @@ export default function Meetings() {
       setMotionTitleInput("");
       setMotionDescriptionInput("");
       setMotionType("standard");
+      setMotionVotingMode("named");
       setRaiseModalOpen(false);
     } catch (err) {
       console.error("Failed to raise motion", err);
@@ -388,22 +393,34 @@ export default function Meetings() {
                     const motion = entry.item;
                     const motionId = String(motion._id);
                     const replies = motion.replies || [];
-                    const userVote = getVoteChoice(motion.voterMap, username);
                     const selected = selectedMotionId === motionId;
                     const isClosed = motion.status === "closed";
                     const resultLabel =
                       motion.outcome && motion.outcome !== "pending"
                         ? motion.outcome.toUpperCase()
                         : "PENDING";
+                    const votingMode = motion.votingMode || "named";
+                    const anonymousVoters = motion.anonymousVotedUsers || [];
+                    const userVote = votingMode === "named" ? getVoteChoice(motion.voterMap, username) : null;
+                    const userVotedAnonymous =
+                      votingMode === "anonymous" && username
+                        ? anonymousVoters.includes(username)
+                        : false;
                     const typeLabel =
                       motion.type === "procedure"
                         ? `Procedural motion · requires ${motion.requiredPercentage || 66}%`
                         : `Standard motion · requires ${motion.requiredPercentage || 50}%`;
+                    const votingModeLabel = votingMode === "anonymous" ? "Anonymous" : "Named";
                     const displayTitle = motion.title || motion.text || "Untitled motion";
                     const replyText = replyTextMap[motionId] || "";
                     const replyStance = replyStanceMap[motionId] || "neutral";
                     const replyError = replyErrorMap[motionId];
                     const replySubmitting = Boolean(replySubmittingMap[motionId]);
+                    const showVoterList = Boolean(voterListExpanded[motionId]);
+                    const voteButtonsDisabled =
+                      !username ||
+                      isClosed ||
+                      (votingMode === "anonymous" && userVotedAnonymous);
                     return (
                       <div
                         key={`motion-${motionId}-${i}`}
@@ -423,43 +440,53 @@ export default function Meetings() {
                           </span>{" "}
                           <b>Motion:</b> {displayTitle} — <i>{motion.proposer}</i>
                         </div>
+                        {votingMode === "anonymous" && (
+                          <div style={{ marginTop: 4, fontSize: "0.85rem", color: "#555" }}>
+                            Total voters: {anonymousVoters.length}
+                          </div>
+                        )}
+                        {votingMode === "anonymous" && userVotedAnonymous && !isClosed && (
+                          <div style={{ marginTop: 4, fontSize: "0.85rem", color: "#b00020" }}>
+                            You have already voted on this motion (anonymous).
+                          </div>
+                        )}
                         {motion.description && (
                           <div style={{ marginBottom: 6, color: "#333" }}>
                             {motion.description}
                           </div>
                         )}
                         <div style={{ fontSize: "0.85rem", color: "#555", marginBottom: 6 }}>
-                          {typeLabel}
+                          {typeLabel} · Voting mode: {votingModeLabel}
                         </div>
                         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                           <button
                             type="button"
-                            disabled={isClosed}
-                            onClick={(e) => { e.stopPropagation(); if (!isClosed) toggleVote(motionId, "up"); }}
+                            disabled={voteButtonsDisabled}
+                            onClick={(e) => { e.stopPropagation(); if (!voteButtonsDisabled) toggleVote(motionId, "up"); }}
                             style={{
                               background: userVote === "up" ? "#0b8457" : "#e0f1ea",
                               color: userVote === "up" ? "#fff" : "#000",
                               border: "none",
                               padding: "6px 10px",
                               borderRadius: 6,
-                              cursor: isClosed ? "not-allowed" : "pointer",
-                              opacity: isClosed ? 0.6 : 1,
+                              cursor: voteButtonsDisabled ? "not-allowed" : "pointer",
+                              opacity: voteButtonsDisabled ? 0.6 : 1,
                             }}
                           >
                             👍 {motion.votes?.up ?? 0}
                           </button>
                           <button
                             type="button"
-                            disabled={isClosed}
-                            onClick={(e) => { e.stopPropagation(); if (!isClosed) toggleVote(motionId, "down"); }}
+                            disabled={voteButtonsDisabled}
+                            onClick={(e) => { e.stopPropagation(); if (!voteButtonsDisabled) toggleVote(motionId, "down"); }}
                             style={{
                               background: userVote === "down" ? "#b71c1c" : "#fdecea",
                               color: userVote === "down" ? "#fff" : "#000",
                               border: "none",
                               padding: "6px 10px",
                               borderRadius: 6,
-                              cursor: isClosed ? "not-allowed" : "pointer",
-                              opacity: isClosed ? 0.6 : 1,
+                              cursor: voteButtonsDisabled ? "not-allowed" : "pointer",
+                              opacity: voteButtonsDisabled ? 0.6 : 1,
                             }}
                           >
                             👎 {motion.votes?.down ?? 0}
@@ -494,6 +521,49 @@ export default function Meetings() {
                         {isClosed && (
                           <div style={{ marginTop: 6, fontSize: "0.9rem", color: "#555" }}>
                             Final tally: 👍 {motion.votes?.up ?? 0} / 👎 {motion.votes?.down ?? 0}
+                          </div>
+                        )}
+                        {isClosed && votingMode === "named" && (
+                          <div style={{ marginTop: 6 }}>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setVoterListExpanded((prev) => ({
+                                  ...prev,
+                                  [motionId]: !prev[motionId],
+                                }));
+                              }}
+                              style={{
+                                border: "none",
+                                background: "transparent",
+                                color: "#0582CA",
+                                cursor: "pointer",
+                                fontWeight: 600,
+                                padding: 0,
+                              }}
+                            >
+                              {showVoterList ? "Hide voter list" : "Show voter list"}
+                            </button>
+                            {showVoterList && (
+                              <ul style={{ marginTop: 6, paddingLeft: 18 }}>
+                                {(() => {
+                                  const entries = motion.voterMap
+                                    ? typeof motion.voterMap.entries === "function"
+                                      ? Array.from(motion.voterMap.entries())
+                                      : Object.entries(motion.voterMap)
+                                    : [];
+                                  if (entries.length === 0) {
+                                    return <li>No votes recorded.</li>;
+                                  }
+                                  return entries.map(([name, choice]) => (
+                                    <li key={`${motionId}-${name}`}>
+                                      {name} — {choice === "up" ? "👍" : "👎"}
+                                    </li>
+                                  ));
+                                })()}
+                              </ul>
+                            )}
                           </div>
                         )}
                         <div
@@ -724,6 +794,16 @@ export default function Meetings() {
               <p style={{ marginTop: 4, color: "#555" }}>
                 Standard motions pass with &gt; 50% in favor. Procedural motions typically require at least two-thirds.
               </p>
+            </FormGroup>
+            <FormGroup label="Voting style">
+              <RadioGroup
+                onChange={(e) => setMotionVotingMode(e.target.value)}
+                selectedValue={motionVotingMode}
+                inline
+              >
+                <Radio value="named" label="Named (record each vote)" />
+                <Radio value="anonymous" label="Anonymous (only show totals)" />
+              </RadioGroup>
             </FormGroup>
             {motionError && (
               <p style={{ color: "red", marginTop: 8 }}>{motionError}</p>
