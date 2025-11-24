@@ -124,15 +124,15 @@ export async function updateParticipantRole({ meetingId, participantUsername, ne
   return data.meeting;
 }
 
-export async function closeMotion({ code, motionId, username }) {
+export async function closeMotion({ code, motionId, username, decisionSummary, prosSummary, consSummary }) {
   const res = await fetch(`${API_BASE}/meetings/${code}/motions/${motionId}/close`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ username }),
+    body: JSON.stringify({ username, decisionSummary, prosSummary, consSummary }),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.message || "Failed to close motion");
-  return data.motion;
+  return data.meeting;
 }
 
 export async function addReplyToMotion({ meetingId, motionId, text, stance, displayName, username }) {
@@ -144,4 +144,24 @@ export async function addReplyToMotion({ meetingId, motionId, text, stance, disp
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.message || "Failed to add reply");
   return data.motion;
+}
+
+export async function updateMeetingSummary({ code, username, meetingSummary }) {
+  const res = await fetch(`${API_BASE}/meetings/${code}/summary`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, meetingSummary }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.message || "Failed to update meeting summary");
+  return data.meeting;
+}
+
+export async function downloadMeetingMinutes({ code }) {
+  const res = await fetch(`${API_BASE}/meetings/${code}/export`);
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.message || "Failed to export meeting minutes");
+  }
+  return res.blob();
 }

@@ -55,6 +55,9 @@ const MotionSchema = new mongoose.Schema(
     outcome: { type: String, enum: ["pending", "passed", "failed"], default: "pending" },
     closedAt: { type: Date, default: null },
     replies: { type: [ReplySchema], default: [] },
+    decisionSummary: { type: String, default: "" },
+    prosSummary: { type: String, default: "" },
+    consSummary: { type: String, default: "" },
   },
   { _id: true, timestamps: true }
 );
@@ -87,6 +90,7 @@ const MeetingSchema = new mongoose.Schema(
     },
     motions:      [MotionSchema],
     messages:     [MessageSchema],
+    meetingSummary: { type: String, default: "" },
   },
   { timestamps: true }
 );

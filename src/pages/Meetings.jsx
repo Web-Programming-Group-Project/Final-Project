@@ -18,7 +18,25 @@ import {
   updateParticipantRole,
   closeMotion as apiCloseMotion,
   addReplyToMotion,
+  updateMeetingSummary as apiUpdateMeetingSummary,
+  downloadMeetingMinutes as apiDownloadMeetingMinutes,
 } from "../api";
+
+function sanitizeTitleForFilename(value) {
+  return (value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s_-]/g, "")
+    .trim()
+    .replace(/\s+/g, "_")
+    .replace(/_+/g, "_");
+}
+
+function buildMinutesFilename(meeting) {
+  const slug = sanitizeTitleForFilename(meeting?.title);
+  if (slug) return `minutes_${slug}.txt`;
+  const fallbackCode = meeting?.code || "meeting";
+  return `minutes_${fallbackCode}.txt`;
+}
 
 function getVoteChoice(voterMap, username) {
   if (!voterMap || !username) return null;
@@ -54,10 +72,24 @@ export default function Meetings() {
   const [replyStanceMap, setReplyStanceMap] = useState({});
   const [replyErrorMap, setReplyErrorMap] = useState({});
   const [replySubmittingMap, setReplySubmittingMap] = useState({});
+  const [closeVotingModalMotion, setCloseVotingModalMotion] = useState(null);
+  const [closeDecisionSummary, setCloseDecisionSummary] = useState("");
+  const [closeProsSummary, setCloseProsSummary] = useState("");
+  const [closeConsSummary, setCloseConsSummary] = useState("");
+  const [closeVotingError, setCloseVotingError] = useState("");
+  const [closingVoting, setClosingVoting] = useState(false);
+  const [meetingSummaryModalOpen, setMeetingSummaryModalOpen] = useState(false);
+  const [meetingSummaryInput, setMeetingSummaryInput] = useState("");
+  const [meetingSummarySaving, setMeetingSummarySaving] = useState(false);
+  const [meetingSummaryError, setMeetingSummaryError] = useState("");
+  const [previousDetailsExpanded, setPreviousDetailsExpanded] = useState({});
+  const [downloadingMinutes, setDownloadingMinutes] = useState(false);
   const chatEndRef = useRef(null);
 
   const code = meeting?.code || initialCode;
   const username = user?.username || user?.email;
+  const closeVotingModalOpen = Boolean(closeVotingModalMotion);
+  const closingMotion = closeVotingModalMotion;
 
   useEffect(() => {
     if (!code) {
@@ -114,6 +146,23 @@ export default function Meetings() {
     ];
     return entries.sort((a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0));
   }, [generalMessages, meeting?.motions]);
+
+  const meetingSummaryText = (meeting?.meetingSummary || "").trim();
+  const meetingSummaryButtonLabel = meetingSummaryText ? "Edit Meeting Summary" : "Add Meeting Summary";
+
+  const previousDecisions = useMemo(() => {
+    return (meeting?.motions || [])
+      .filter(
+        (motion) =>
+          motion.status === "closed" ||
+          Boolean((motion.decisionSummary || "").trim())
+      )
+      .sort(
+        (a, b) =>
+          new Date(b.closedAt || b.updatedAt || 0) -
+          new Date(a.closedAt || a.updatedAt || 0)
+      );
+  }, [meeting?.motions]);
 
   const myRole =
     meeting?.participants?.find((p) => p.username === username)?.role || "member";
@@ -241,16 +290,115 @@ export default function Meetings() {
     }
   }
 
-  async function handleCloseVoting(motionId) {
-    if (!meeting || !code || !username) return;
+  function openCloseVotingModalForMotion(motion) {
+    if (!canManageMotions) return;
+    setCloseVotingModalMotion(motion);
+    setCloseDecisionSummary(motion?.decisionSummary || "");
+    setCloseProsSummary(motion?.prosSummary || "");
+    setCloseConsSummary(motion?.consSummary || "");
+    setCloseVotingError("");
+  }
+
+  function dismissCloseVotingModal(force = false) {
+    if (closingVoting && !force) return;
+    setCloseVotingModalMotion(null);
+    setCloseDecisionSummary("");
+    setCloseProsSummary("");
+    setCloseConsSummary("");
+  }
+
+  async function submitCloseVoting(e) {
+    e.preventDefault();
+    if (!meeting || !code || !username || !closeVotingModalMotion) return;
+    const decision = closeDecisionSummary.trim();
+    if (!decision) {
+      setCloseVotingError("Decision summary is required.");
+      return;
+    }
+    setClosingVoting(true);
+    setCloseVotingError("");
     try {
-      await apiCloseMotion({ code, motionId, username });
-      const refreshed = await getMeeting({ code });
-      setMeeting(refreshed);
+      const updatedMeeting = await apiCloseMotion({
+        code,
+        motionId: closeVotingModalMotion._id,
+        username,
+        decisionSummary: decision,
+        prosSummary: closeProsSummary.trim(),
+        consSummary: closeConsSummary.trim(),
+      });
+      setMeeting(updatedMeeting);
+      dismissCloseVotingModal(true);
     } catch (err) {
       console.error("Failed to close voting", err);
-      window.alert(err.message || "Failed to close voting");
+      setCloseVotingError(err.message || "Failed to close voting");
+    } finally {
+      setClosingVoting(false);
     }
+  }
+
+  function openMeetingSummaryModal() {
+    if (!canManageMotions) return;
+    setMeetingSummaryInput(meeting?.meetingSummary || "");
+    setMeetingSummaryError("");
+    setMeetingSummaryModalOpen(true);
+  }
+
+  function closeMeetingSummaryModal() {
+    if (meetingSummarySaving) return;
+    setMeetingSummaryModalOpen(false);
+  }
+
+  async function handleMeetingSummarySave(e) {
+    e.preventDefault();
+    if (!code || !username || !canManageMotions) return;
+    setMeetingSummarySaving(true);
+    setMeetingSummaryError("");
+    try {
+      const updatedMeeting = await apiUpdateMeetingSummary({
+        code,
+        username,
+        meetingSummary: meetingSummaryInput.trim(),
+      });
+      setMeeting(updatedMeeting);
+      setMeetingSummaryModalOpen(false);
+    } catch (err) {
+      console.error("Failed to update meeting summary", err);
+      setMeetingSummaryError(err.message || "Failed to update meeting summary");
+    } finally {
+      setMeetingSummarySaving(false);
+    }
+  }
+
+  async function handleDownloadMinutes() {
+    if (!code) return;
+    setDownloadingMinutes(true);
+    try {
+      const blob = await apiDownloadMeetingMinutes({ code });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      const filename = buildMinutesFilename({
+        title: meeting?.title,
+        code: meeting?.code || code,
+      });
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("Failed to download minutes", err);
+      window.alert(err.message || "Failed to download minutes");
+    } finally {
+      setDownloadingMinutes(false);
+    }
+  }
+
+  function toggleProsCons(motionId) {
+    setPreviousDetailsExpanded((prev) => ({
+      ...prev,
+      [motionId]: !prev[motionId],
+    }));
   }
 
   async function submitReply(motionId) {
@@ -347,6 +495,48 @@ export default function Meetings() {
               <div style={{ fontSize: "0.95rem", color: "#555", marginBottom: 12 }}>
                 Your role in this meeting: <strong>{myRole}</strong>
               </div>
+              <div style={{ background: "#eef5ff", borderRadius: 10, padding: 16, marginBottom: 16, border: "1px solid #c7ddff" }}>
+                <div style={{ fontWeight: 600, marginBottom: 8 }}>Overall Meeting Summary</div>
+                <div style={{ fontSize: "0.95rem", color: "#333", whiteSpace: "pre-line" }}>
+                  {meetingSummaryText || "No summary provided yet."}
+                </div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 12 }}>
+                  {canManageMotions && (
+                    <button
+                      type="button"
+                      onClick={openMeetingSummaryModal}
+                      style={{
+                        borderRadius: 6,
+                        border: "1px solid #0582CA",
+                        background: "#fff",
+                        color: "#0582CA",
+                        padding: "6px 12px",
+                        fontWeight: 600,
+                        cursor: "pointer",
+                      }}
+                    >
+                      {meetingSummaryButtonLabel}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={handleDownloadMinutes}
+                    disabled={downloadingMinutes}
+                    style={{
+                      borderRadius: 6,
+                      border: "none",
+                      background: downloadingMinutes ? "#9fbfdc" : "#0582CA",
+                      color: "#fff",
+                      padding: "6px 12px",
+                      fontWeight: 600,
+                      cursor: downloadingMinutes ? "not-allowed" : "pointer",
+                      opacity: downloadingMinutes ? 0.8 : 1,
+                    }}
+                  >
+                    {downloadingMinutes ? "Downloading..." : "Download minutes"}
+                  </button>
+                </div>
+              </div>
               <div>
                 <b>Members:</b>
                 {roleError && <div style={{ color: "red", fontSize: "0.85rem", marginTop: 4 }}>{roleError}</div>}
@@ -381,10 +571,134 @@ export default function Meetings() {
                   )}
                 </ul>
               </div>
+              <div
+                style={{
+                  marginTop: 16,
+                  background: "#fff",
+                  borderRadius: 8,
+                  padding: 10,
+                  border: "1px solid #c0d3e7",
+                  maxHeight: 220,
+                  overflowY: "auto",
+                }}
+              >
+                <div style={{ fontWeight: 600, fontSize: "1.05rem", marginBottom: 8 }}>
+                  Previous Decisions
+                </div>
+                {previousDecisions.length === 0 ? (
+                  <div style={{ color: "#666", fontSize: "0.85rem" }}>
+                    No previous decisions recorded yet.
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {previousDecisions.map((motion) => {
+                      const motionId = String(motion._id);
+                      const summaryText = (motion.decisionSummary || "").trim();
+                      const hasSummary = Boolean(summaryText);
+                      const hasProsCons =
+                        Boolean((motion.prosSummary || "").trim()) ||
+                        Boolean((motion.consSummary || "").trim());
+                      const expanded = Boolean(previousDetailsExpanded[motionId]);
+                      const up = motion.votes?.up ?? 0;
+                      const down = motion.votes?.down ?? 0;
+                      return (
+                        <div
+                          key={`decision-${motionId}`}
+                          style={{
+                            border: "1px solid #e0e7f1",
+                            borderRadius: 6,
+                            padding: 8,
+                            background: "#fdfdff",
+                            fontSize: "0.9rem",
+                            lineHeight: 1.4,
+                          }}
+                        >
+                          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                            <div style={{ fontWeight: 600, color: "#1f2a44" }}>
+                              {motion.title || motion.text || "Untitled motion"}
+                            </div>
+                            <span style={{ color: "#5a637d" }}>
+                              Outcome: {(motion.outcome || "pending").toUpperCase()}
+                            </span>
+                          </div>
+                          <div style={{ color: "#5a637d", fontSize: "0.85rem" }}>
+                            Final tally: 👍 {up} / 👎 {down}
+                          </div>
+                          {hasSummary && (
+                            <div style={{ marginTop: 4, color: "#2f3b61" }}>
+                              <strong>Summary:</strong> {summaryText}
+                            </div>
+                          )}
+                          {hasProsCons && (
+                            <button
+                              type="button"
+                              onClick={() => toggleProsCons(motionId)}
+                              style={{
+                                border: "none",
+                                background: "transparent",
+                                color: "#0582CA",
+                                fontWeight: 600,
+                                cursor: "pointer",
+                                padding: 0,
+                                marginTop: 6,
+                              }}
+                            >
+                              {expanded ? "Hide pros/cons" : "Show pros/cons"}
+                            </button>
+                          )}
+                          {hasProsCons && expanded && (
+                            <div
+                              style={{
+                                marginTop: 6,
+                                fontSize: "0.85rem",
+                                color: "#333",
+                                background: "#f5f8ff",
+                                borderRadius: 6,
+                                padding: 8,
+                              }}
+                            >
+                              <div>
+                                <strong>Pros:</strong>{" "}
+                                {(motion.prosSummary || "").trim() || "No pros recorded."}
+                              </div>
+                              <div style={{ marginTop: 4 }}>
+                                <strong>Cons:</strong>{" "}
+                                {(motion.consSummary || "").trim() || "No cons recorded."}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
             </div>
-            <div style={{ width: 455, background: "#e5ecf5", borderRadius: 12, padding: 16, display: "flex", flexDirection: "column", height: 520 }}>
+            <div
+              style={{
+                width: 455,
+                background: "#e5ecf5",
+                borderRadius: 12,
+                padding: 16,
+                display: "flex",
+                flexDirection: "column",
+                minHeight: 520,
+                maxHeight: "85vh",
+              }}
+            >
               <div style={{ fontWeight: 600, fontSize: "1.2rem", marginBottom: 8 }}>Chat</div>
-              <div style={{ flex: 1, overflowY: "auto", marginBottom: 8, background: "#fff", borderRadius: 8, padding: 8, border: "1px solid #c0d3e7" }}>
+              <div
+                style={{
+                  flex: 1,
+                  minHeight: 0,
+                  overflowY: "auto",
+                  marginBottom: 12,
+                  background: "#fff",
+                  borderRadius: 8,
+                  padding: 8,
+                  border: "1px solid #c0d3e7",
+                }}
+              >
                 {timeline.length === 0 && (
                   <div style={{ color: "#888" }}>No messages yet.</div>
                 )}
@@ -494,7 +808,10 @@ export default function Meetings() {
                           {canManageMotions && !isClosed && (
                             <button
                               type="button"
-                              onClick={(e) => { e.stopPropagation(); handleCloseVoting(motionId); }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openCloseVotingModalForMotion(motion);
+                              }}
                               style={{
                                 borderRadius: 6,
                                 border: "1px solid #b71c1c",
@@ -691,19 +1008,35 @@ export default function Meetings() {
               </div>
               <div
                 className="chat-footer"
-                style={{ borderTop: "1px solid #d0d7e5", paddingTop: 8, marginTop: 4 }}
+                style={{
+                  borderTop: "1px solid #d0d7e5",
+                  background: "#f5f8ff",
+                  padding: "10px 12px",
+                  borderRadius: 10,
+                  borderTopLeftRadius: 6,
+                  borderTopRightRadius: 6,
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 8,
+                }}
               >
                 <form
                   className="chat-main-row"
-                  style={{ display: "flex", gap: 8 }}
+                  style={{ display: "flex", gap: 8, alignItems: "center" }}
                   onSubmit={sendMessage}
                 >
                   <input
                     type="text"
                     value={messageText}
-                    onChange={e => setMessageText(e.target.value)}
+                    onChange={(e) => setMessageText(e.target.value)}
                     placeholder="Type a message..."
-                    style={{ flex: 1, borderRadius: 6, border: "1px solid #b0b0b0", padding: 6 }}
+                    style={{
+                      flex: 1,
+                      borderRadius: 6,
+                      border: "1px solid #b0b0b0",
+                      padding: 8,
+                      fontSize: "0.95rem",
+                    }}
                   />
                   <button
                     type="submit"
@@ -713,19 +1046,16 @@ export default function Meetings() {
                       background: !messageText.trim() ? "#9fbfdc" : "#0582CA",
                       color: "#fff",
                       border: "none",
-                      padding: "6px 14px",
+                      padding: "8px 16px",
                       fontWeight: 600,
-                      cursor: !messageText.trim() ? "not-allowed" : "pointer"
+                      cursor: !messageText.trim() ? "not-allowed" : "pointer",
                     }}
                   >
                     Send
                   </button>
                 </form>
-                <div
-                  className="chat-secondary-row"
-                  style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 6, fontSize: "0.9rem" }}
-                >
-                  {showRaiseButton && (
+                {showRaiseButton && (
+                  <div className="chat-secondary-row" style={{ display: "flex", justifyContent: "flex-end" }}>
                     <button
                       type="button"
                       onClick={openRaiseMotionModal}
@@ -743,13 +1073,122 @@ export default function Meetings() {
                     >
                       Raise Motion
                     </button>
-                  )}
-                </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>
         )}
       </div>
+      <Dialog
+        isOpen={closeVotingModalOpen}
+        onClose={() => dismissCloseVotingModal()}
+        title="Close Voting & Record Decision"
+      >
+        <form onSubmit={submitCloseVoting}>
+          <div className={Classes.DIALOG_BODY}>
+            {closingMotion ? (
+              <div style={{ marginBottom: 12 }}>
+                <div style={{ fontWeight: 600, fontSize: "1.1rem" }}>
+                  {closingMotion.title || closingMotion.text || "Untitled motion"}
+                </div>
+                <div style={{ fontSize: "0.9rem", color: "#555", marginTop: 4 }}>
+                  Type: {closingMotion.type === "procedure" ? "Procedural" : "Standard"} · Requires{" "}
+                  {closingMotion.requiredPercentage || (closingMotion.type === "procedure" ? 66 : 50)}%
+                </div>
+                <div style={{ fontSize: "0.9rem", color: "#555" }}>
+                  Current tally: 👍 {closingMotion.votes?.up ?? 0} / 👎 {closingMotion.votes?.down ?? 0}
+                </div>
+              </div>
+            ) : (
+              <div style={{ marginBottom: 12 }}>Select a motion to close voting.</div>
+            )}
+            <FormGroup
+              label="Decision summary"
+              labelFor="decision-summary-input"
+              helperText="Capture the key outcome or rationale."
+            >
+              <textarea
+                id="decision-summary-input"
+                className="bp4-input"
+                rows={4}
+                required
+                value={closeDecisionSummary}
+                onChange={(e) => setCloseDecisionSummary(e.target.value)}
+              />
+            </FormGroup>
+            <FormGroup label="Pros (optional)" labelFor="decision-pros-input">
+              <textarea
+                id="decision-pros-input"
+                className="bp4-input"
+                rows={3}
+                value={closeProsSummary}
+                onChange={(e) => setCloseProsSummary(e.target.value)}
+                placeholder="Key supporting points"
+              />
+            </FormGroup>
+            <FormGroup label="Cons (optional)" labelFor="decision-cons-input">
+              <textarea
+                id="decision-cons-input"
+                className="bp4-input"
+                rows={3}
+                value={closeConsSummary}
+                onChange={(e) => setCloseConsSummary(e.target.value)}
+                placeholder="Key opposing points"
+              />
+            </FormGroup>
+            {closeVotingError && (
+              <p style={{ color: "red", marginTop: 4 }}>{closeVotingError}</p>
+            )}
+          </div>
+          <div className={Classes.DIALOG_FOOTER}>
+            <div className={Classes.DIALOG_FOOTER_ACTIONS}>
+              <BPButton onClick={() => dismissCloseVotingModal()} disabled={closingVoting}>
+                Cancel
+              </BPButton>
+              <BPButton intent="primary" type="submit" loading={closingVoting}>
+                Confirm &amp; Close Voting
+              </BPButton>
+            </div>
+          </div>
+        </form>
+      </Dialog>
+      <Dialog
+        isOpen={meetingSummaryModalOpen}
+        onClose={closeMeetingSummaryModal}
+        title="Meeting Summary"
+      >
+        <form onSubmit={handleMeetingSummarySave}>
+          <div className={Classes.DIALOG_BODY}>
+            <FormGroup
+              label="Overall meeting summary (context, key outcomes, follow-ups)"
+              labelFor="meeting-summary-input"
+            >
+              <textarea
+                id="meeting-summary-input"
+                className="bp4-input"
+                rows={6}
+                value={meetingSummaryInput}
+                onChange={(e) => setMeetingSummaryInput(e.target.value)}
+                placeholder="Document context, major decisions, and follow-up actions for future reference."
+              />
+            </FormGroup>
+            {meetingSummaryError && (
+              <p style={{ color: "red", marginTop: 4 }}>{meetingSummaryError}</p>
+            )}
+          </div>
+          <div className={Classes.DIALOG_FOOTER}>
+            <div className={Classes.DIALOG_FOOTER_ACTIONS}>
+              <BPButton onClick={closeMeetingSummaryModal} disabled={meetingSummarySaving}>
+                Cancel
+              </BPButton>
+              <BPButton intent="primary" type="submit" loading={meetingSummarySaving}>
+                Save Summary
+              </BPButton>
+            </div>
+          </div>
+        </form>
+      </Dialog>
       <Dialog
         isOpen={raiseModalOpen}
         onClose={closeRaiseMotionModal}

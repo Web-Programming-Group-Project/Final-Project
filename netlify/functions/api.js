@@ -84,6 +84,15 @@ function makeCode() {
   return out;
 }
 
+function sanitizeForFilename(value) {
+  return (value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s_-]/g, "")
+    .trim()
+    .replace(/\s+/g, "_")
+    .replace(/_+/g, "_");
+}
+
 async function getMeetingByCode(code) {
   return Meeting.findOne({ code: (code || "").toUpperCase() });
 }
@@ -342,8 +351,11 @@ app.post("/meetings/:code/messages", async (req, res) => {
 });
 
 async function closeMotionRoute(req, res) {
-  const { username } = req.body || {};
+  const { username, decisionSummary, prosSummary, consSummary } = req.body || {};
   if (!username) return res.status(400).json({ message: "username required" });
+  if (!decisionSummary || !decisionSummary.trim()) {
+    return res.status(400).json({ message: "decisionSummary is required to close voting." });
+  }
 
   const mtg = await getMeetingByCode(req.params.code);
   if (!mtg) return res.status(404).json({ message: "Meeting not found" });
@@ -370,9 +382,15 @@ async function closeMotionRoute(req, res) {
   motion.outcome = passed ? "passed" : "failed";
   motion.closedAt = new Date();
   motion.updatedAt = new Date();
+  motion.decisionSummary = decisionSummary || "";
+  motion.prosSummary = prosSummary || "";
+  motion.consSummary = consSummary || "";
 
   const displayTitle = motion.title || motion.text || "Untitled motion";
-  const summary = `${motion.type === "procedure" ? "Procedural motion" : "Motion"} "${displayTitle}" ${passed ? "PASSED" : "FAILED"} (${up} in favor, ${down} against; required ${required}%, got ${Math.round(yesPercentage)}% — ${ (motion.votingMode || "named") === "anonymous" ? "anonymous vote" : "named vote" }).`;
+  let summary = `${motion.type === "procedure" ? "Procedural motion" : "Motion"} "${displayTitle}" ${passed ? "PASSED" : "FAILED"} (${up} in favor, ${down} against; required ${required}%, got ${Math.round(yesPercentage)}% — ${ (motion.votingMode || "named") === "anonymous" ? "anonymous vote" : "named vote" }).`;
+  if ((motion.decisionSummary || "").trim()) {
+    summary += `\nSummary: ${motion.decisionSummary.trim()}`;
+  }
 
   mtg.messages.push({
     author: "System",
@@ -381,7 +399,7 @@ async function closeMotionRoute(req, res) {
   });
 
   await mtg.save();
-  res.json({ message: "Motion voting closed", motion });
+  res.json({ message: "Motion voting closed", meeting: mtg, motion });
 }
 
 app.post("/meetings/:code/motions/:motionId/close", closeMotionRoute);
@@ -412,6 +430,125 @@ async function openMotionRoute(req, res) {
 
 app.post("/meetings/:code/motions/:motionId/open", openMotionRoute);
 app.patch("/meetings/:code/motions/:motionId/open", openMotionRoute);
+
+app.put("/meetings/:code/summary", async (req, res) => {
+  const { username, meetingSummary } = req.body || {};
+  if (!username) return res.status(400).json({ message: "username required" });
+
+  const mtg = await getMeetingByCode(req.params.code);
+  if (!mtg) return res.status(404).json({ message: "Meeting not found" });
+
+  const role = getUserRole(mtg, username);
+  if (!["owner", "chair"].includes(role)) {
+    return res.status(403).json({ message: "Only the chair/owner can edit the meeting summary." });
+  }
+
+  mtg.meetingSummary = (meetingSummary || "").trim();
+  await mtg.save();
+  res.json({ meeting: mtg });
+});
+
+app.get("/meetings/:code/export", async (req, res) => {
+  const mtg = await getMeetingByCode(req.params.code);
+  if (!mtg) return res.status(404).json({ message: "Meeting not found" });
+
+  const created = new Date(mtg.createdAt || Date.now()).toLocaleString();
+  const summary = (mtg.meetingSummary || "").trim() || "No summary provided.";
+  const participantLines = (mtg.participants || []).map(
+    (p) => `- ${p.displayName || p.username} (${p.role})`
+  );
+  const titleSlug = sanitizeForFilename(mtg.title);
+  const minutesFilename = titleSlug
+    ? `minutes_${titleSlug}.txt`
+    : `minutes_${mtg.code || "meeting"}.txt`;
+
+  const motionLines = (mtg.motions || []).map((motion, idx) => {
+    const motionTitle = motion.title || motion.text || "Untitled motion";
+    const required = motion.requiredPercentage || (motion.type === "procedure" ? 66 : 50);
+    const up = motion.votes?.up || 0;
+    const down = motion.votes?.down || 0;
+    const outcome =
+      motion.status === "closed"
+        ? (motion.outcome || "pending").toUpperCase()
+        : "PENDING";
+    const decisionSummary = (motion.decisionSummary || "").trim();
+
+    const replies = motion.replies || [];
+    const prosReplies = replies.filter((reply) => (reply.stance || "").toLowerCase() === "pro");
+    const consReplies = replies.filter((reply) => (reply.stance || "").toLowerCase() === "con");
+
+    const repliesLog = (motion.replies || []).map(
+      (reply) =>
+        `  - [${new Date(reply.createdAt || motion.updatedAt || Date.now()).toLocaleString()} — ${
+          reply.authorDisplayName || reply.authorUsername || "Unknown"
+        }] (${reply.stance || "neutral"}): ${reply.text}`
+    );
+    const discussionMessages = (mtg.messages || [])
+      .filter((msg) => msg.motionId && String(msg.motionId) === String(motion._id))
+      .map(
+        (msg) =>
+          `  - [${new Date(msg.createdAt || Date.now()).toLocaleString()} — ${msg.author || "Unknown"}]: ${
+            msg.text
+          }`
+      );
+    const discussionBlock = [...repliesLog, ...discussionMessages];
+
+    const lines = [
+      `${idx + 1}. ${motionTitle}`,
+      `   • Type: ${motion.type || "standard"} (requires ${required}%)`,
+      `   • Outcome: ${outcome} — 👍 ${up} / 👎 ${down}`,
+    ];
+    if (decisionSummary) {
+      lines.push(`   • Decision summary: ${decisionSummary}`);
+    }
+    lines.push("   • Pros:");
+    if (prosReplies.length === 0) {
+      lines.push("     - None recorded.");
+    } else {
+      prosReplies.forEach((reply) => {
+        const author = reply.authorDisplayName || reply.authorUsername || "Unknown";
+        lines.push(`     - ${author}: ${reply.text}`);
+      });
+    }
+    lines.push("   • Cons:");
+    if (consReplies.length === 0) {
+      lines.push("     - None recorded.");
+    } else {
+      consReplies.forEach((reply) => {
+        const author = reply.authorDisplayName || reply.authorUsername || "Unknown";
+        lines.push(`     - ${author}: ${reply.text}`);
+      });
+    }
+    if (discussionBlock.length > 0) {
+      lines.push("   • Discussion:");
+      discussionBlock.forEach((entry) => lines.push(entry));
+    }
+    return lines.join("\n");
+  });
+
+  const exportText = [
+    `Meeting: ${mtg.title}`,
+    `Code: ${mtg.code}`,
+    `Created: ${created}`,
+    "",
+    "Participants:",
+    participantLines.length ? participantLines.join("\n") : "- None recorded",
+    "",
+    "Overall Summary:",
+    summary,
+    "",
+    "Motions and Decisions:",
+    motionLines.length ? motionLines.join("\n\n") : "No motions recorded.",
+    "",
+  ].join("\n");
+
+  res.setHeader("Content-Type", "text/plain; charset=utf-8");
+  res.setHeader(
+    "Content-Disposition",
+    `attachment; filename="${minutesFilename}"`
+  );
+  res.send(exportText);
+});
 
 app.post("/meetings/:meetingId/motions/:motionId/replies", async (req, res) => {
   const { meetingId, motionId } = req.params;
