@@ -5,6 +5,13 @@ import Header from "../../components/Header";
 import { useNavigate } from "react-router-dom";
 import CreateMeeting from "../../components/create-meeting";
 import {
+  Dialog,
+  Classes,
+  Button as BPButton,
+  FormGroup,
+  InputGroup,
+} from "@blueprintjs/core";
+import {
   listMeetings,
   createMeeting as apiCreateMeeting,
   joinMeeting as apiJoinMeeting,
@@ -21,6 +28,11 @@ export default function JoinCreate() {
   const [listError, setListError] = useState("");
   const [copiedCode, setCopiedCode] = useState(null);
   const [activeTab, setActiveTab] = useState("my");
+  const [showJoinForm, setShowJoinForm] = useState(false);
+  const [joinCode, setJoinCode] = useState("");
+  const [joinDisplayName, setJoinDisplayName] = useState("");
+  const [joinError, setJoinError] = useState("");
+  const [joining, setJoining] = useState(false);
   const { user } = useAppContext();
   const navigate = useNavigate();
   const username = user?.username || user?.email || "";
@@ -82,20 +94,49 @@ export default function JoinCreate() {
     }
   }
 
-  async function handleJoin() {
-    const code = window.prompt("Enter meeting code to join:");
-    if (!code) return;
+  useEffect(() => {
+    if (showJoinForm) {
+      setJoinDisplayName(username);
+    }
+  }, [showJoinForm, username]);
+
+  function openJoinForm() {
     if (!username) {
       window.alert("You must be logged in to join a meeting.");
       return;
     }
+    setJoinCode("");
+    setJoinDisplayName(username);
+    setJoinError("");
+    setShowJoinForm(true);
+  }
+
+  async function handleJoinSubmit(e) {
+    e?.preventDefault();
+    if (!username) {
+      setJoinError("You must be logged in to join a meeting.");
+      return;
+    }
+    if (!joinCode.trim()) {
+      setJoinError("Meeting code is required.");
+      return;
+    }
+    setJoining(true);
+    setJoinError("");
     try {
-      const meeting = await apiJoinMeeting({ code: code.trim(), username });
+      const data = await apiJoinMeeting({
+        code: joinCode.trim(),
+        username,
+        displayName: joinDisplayName?.trim(),
+      });
       await refreshMeetings(activeTab);
-      navigate("/Meetings", { state: { meeting, code: meeting?.code } });
+      setShowJoinForm(false);
+      navigate("/Meetings", { state: { meeting: data.meeting, code: data.meeting?.code } });
     } catch (err) {
       console.error("Failed to join meeting", err);
-      window.alert(err.message || "Failed to join meeting");
+      setJoinError(err.message || "Failed to join meeting");
+    } finally {
+      setJoining(false);
     }
   }
 
@@ -107,7 +148,7 @@ export default function JoinCreate() {
     if (!title) {
       throw new Error("Title is required");
     }
-    const meeting = await apiCreateMeeting({ title, username });
+    const meeting = await apiCreateMeeting({ title, username, displayName: username });
     if (activeTab === "my") {
       await refreshMeetings("my");
     } else {
@@ -290,11 +331,58 @@ export default function JoinCreate() {
           <button
             className="LargeButton"
             id = "Joiner"
-            onClick={handleJoin}
+            onClick={openJoinForm}
           >
           Join Meeting
           </button>
         </div>
+        <Dialog
+          isOpen={showJoinForm}
+          onClose={() => {
+            if (joining) return;
+            setShowJoinForm(false);
+            setJoinError("");
+          }}
+        >
+          <div className={`${Classes.DIALOG_HEADER} flex items-center justify-between`}>
+            <h4>Join Meeting</h4>
+            <BPButton icon="cross" minimal onClick={() => { if (!joining) { setShowJoinForm(false); setJoinError(""); } }} />
+          </div>
+          <div className={Classes.DIALOG_BODY}>
+            <form onSubmit={handleJoinSubmit} className="flex flex-col gap-4">
+              <FormGroup label="Meeting Code" labelFor="meeting-code-input">
+                <InputGroup
+                  id="meeting-code-input"
+                  value={joinCode}
+                  onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
+                  placeholder="e.g. ABC123"
+                  required
+                  disabled={joining}
+                />
+              </FormGroup>
+              <FormGroup label="Display Name" labelFor="display-name-input">
+                <InputGroup
+                  id="display-name-input"
+                  value={joinDisplayName}
+                  onChange={(e) => setJoinDisplayName(e.target.value)}
+                  placeholder="How other participants will see you"
+                  disabled={joining}
+                />
+              </FormGroup>
+              {joinError && (
+                <p className="text-sm text-red-600">{joinError}</p>
+              )}
+              <div className={`${Classes.DIALOG_FOOTER} flex justify-end gap-2`}>
+                <BPButton onClick={() => { if (!joining) { setShowJoinForm(false); setJoinError(""); } }} disabled={joining}>
+                  Cancel
+                </BPButton>
+                <BPButton intent="primary" type="submit" loading={joining}>
+                  Join Meeting
+                </BPButton>
+              </div>
+            </form>
+          </div>
+        </Dialog>
         {listError && (
           <div style={{ marginTop: "1rem", color: "red", textAlign: "center" }}>
             {listError}

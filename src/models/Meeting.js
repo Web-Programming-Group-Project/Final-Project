@@ -12,12 +12,23 @@ const MessageSchema = new mongoose.Schema(
 const MotionSchema = new mongoose.Schema(
   {
     proposer: { type: String, required: true },       // username
-    text:     { type: String, required: true },
+    title:    { type: String, required: false },      // new primary title
+    description: { type: String, required: false },   // optional description/details
+    text:     { type: String, required: false },      // legacy field, kept for backward compatibility
+    type: {
+      type: String,
+      enum: ["standard", "procedure"],
+      default: "standard",
+    },
+    requiredPercentage: { type: Number, default: 50 },
     votes:    {
       up:   { type: Number, default: 0 },
       down: { type: Number, default: 0 },
     },
     voterMap: { type: Map, of: String, default: {} }, // username -> 'up' | 'down'
+    status: { type: String, enum: ["open", "closed"], default: "open" },
+    outcome: { type: String, enum: ["pending", "passed", "failed"], default: "pending" },
+    closedAt: { type: Date, default: null },
   },
   { _id: true, timestamps: true }
 );
@@ -25,7 +36,13 @@ const MotionSchema = new mongoose.Schema(
 const ParticipantSchema = new mongoose.Schema(
   {
     username: { type: String, required: true },
-    role:     { type: String, default: "member" },
+    role: {
+      type: String,
+      enum: ["owner", "chair", "member", "observer"],
+      default: "member",
+    },
+    joinedAt: { type: Date, default: Date.now },
+    displayName: { type: String },
   },
   { _id: false }
 );
@@ -34,12 +51,14 @@ const MeetingSchema = new mongoose.Schema(
   {
     title:   { type: String, required: true },
     code:    { type: String, required: true, unique: true },
-    createdBy: { type: String, required: true }, // username of creator
-    creator: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: false },
     open:    { type: Boolean, default: true },
+    creator: { type: String, required: true, alias: "createdBy" }, // username of creator
     visibility: { type: String, enum: ["private"], default: "private" },
 
-    participants: [ParticipantSchema],
+    participants: {
+      type: [ParticipantSchema],
+      default: [],
+    },
     motions:      [MotionSchema],
     messages:     [MessageSchema],
   },

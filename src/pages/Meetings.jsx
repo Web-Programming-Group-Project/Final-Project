@@ -1,12 +1,22 @@
 import { useLocation, useNavigate } from "react-router-dom";
 import React, { useState, useRef, useEffect, useMemo } from "react";
 import Header from "../components/Header";
+import {
+  Dialog,
+  Classes,
+  FormGroup,
+  RadioGroup,
+  Radio,
+  Button as BPButton,
+} from "@blueprintjs/core";
 import { useAppContext } from "../AppContext";
 import {
   getMeeting,
   raiseMotion as apiRaiseMotion,
   voteMotion as apiVoteMotion,
   postMessage as apiPostMessage,
+  updateParticipantRole,
+  closeMotion as apiCloseMotion,
 } from "../api";
 
 function getVoteChoice(voterMap, username) {
@@ -27,8 +37,16 @@ export default function Meetings() {
   const [meeting, setMeeting] = useState(initialMeeting);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [input, setInput] = useState("");
+  const [messageText, setMessageText] = useState("");
   const [selectedMotionId, setSelectedMotionId] = useState(null);
+  const [roleUpdating, setRoleUpdating] = useState(null);
+  const [roleError, setRoleError] = useState("");
+  const [motionType, setMotionType] = useState("standard");
+  const [raiseModalOpen, setRaiseModalOpen] = useState(false);
+  const [motionTitleInput, setMotionTitleInput] = useState("");
+  const [motionDescriptionInput, setMotionDescriptionInput] = useState("");
+  const [motionError, setMotionError] = useState("");
+  const [raisingMotion, setRaisingMotion] = useState(false);
   const chatEndRef = useRef(null);
 
   const code = meeting?.code || initialCode;
@@ -104,9 +122,17 @@ export default function Meetings() {
     return entries.sort((a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0));
   }, [generalMessages, meeting?.motions]);
 
+  const myRole =
+    meeting?.participants?.find((p) => p.username === username)?.role || "member";
+  const canManageMotions = ["owner", "chair"].includes(myRole);
+  const canRaiseMotion = ["owner", "chair"].includes(myRole);
+  const showRaiseButton = myRole !== "observer";
+  const canReply = myRole !== "observer";
+  const canSend = Boolean(username);
+
   async function sendMessage(e) {
     e.preventDefault();
-    const text = input.trim();
+    const text = messageText.trim();
     if (!text || !meeting || !code) return;
     if (!username) {
       window.alert("You must be logged in to chat.");
@@ -118,32 +144,64 @@ export default function Meetings() {
         if (!prev) return prev;
         return { ...prev, messages: [...(prev.messages || []), message] };
       });
-      setInput("");
+      setMessageText("");
     } catch (err) {
       console.error("Failed to send message", err);
       window.alert(err.message || "Failed to send message");
     }
   }
 
-  async function raiseMotion(e) {
+  function openRaiseMotionModal() {
+    if (!canRaiseMotion) return;
+    setMotionTitleInput("");
+    setMotionDescriptionInput("");
+    setMotionError("");
+    setMotionType("standard");
+    setRaiseModalOpen(true);
+  }
+
+  function closeRaiseMotionModal() {
+    if (raisingMotion) return;
+    setRaiseModalOpen(false);
+  }
+
+  async function submitMotion(e) {
     e.preventDefault();
-    const text = input.trim();
-    if (!text || !meeting || !code) return;
-    if (!username) {
-      window.alert("You must be logged in to raise a motion.");
+    if (!canRaiseMotion) return;
+    const title = motionTitleInput.trim();
+    const description = motionDescriptionInput.trim();
+    if (!title || !meeting || !code) {
+      setMotionError("Motion title is required.");
       return;
     }
+    if (!username) {
+      setMotionError("You must be logged in to raise a motion.");
+      return;
+    }
+    setRaisingMotion(true);
+    setMotionError("");
     try {
-      const motion = await apiRaiseMotion({ code, username, text });
+      const motion = await apiRaiseMotion({
+        code,
+        username,
+        title,
+        description,
+        type: motionType,
+      });
       setMeeting((prev) => {
         if (!prev) return prev;
         return { ...prev, motions: [...(prev.motions || []), motion] };
       });
-      setInput("");
       setSelectedMotionId(String(motion._id));
+      setMotionTitleInput("");
+      setMotionDescriptionInput("");
+      setMotionType("standard");
+      setRaiseModalOpen(false);
     } catch (err) {
       console.error("Failed to raise motion", err);
-      window.alert(err.message || "Failed to raise motion");
+      setMotionError(err.message || "Failed to raise motion");
+    } finally {
+      setRaisingMotion(false);
     }
   }
 
@@ -170,7 +228,7 @@ export default function Meetings() {
 
   async function replyToMotion() {
     if (!selectedMotionId) return;
-    const text = input.trim();
+    const text = messageText.trim();
     if (!text || !meeting || !code) return;
     if (!username) {
       window.alert("You must be logged in to reply.");
@@ -182,10 +240,42 @@ export default function Meetings() {
         if (!prev) return prev;
         return { ...prev, messages: [...(prev.messages || []), message] };
       });
-      setInput("");
+      setMessageText("");
     } catch (err) {
       console.error("Failed to reply", err);
       window.alert(err.message || "Failed to reply to motion");
+    }
+  }
+
+  async function handleRoleChange(participantUsername, newRole) {
+    if (!meeting?._id || !username) return;
+    setRoleError("");
+    setRoleUpdating(`${participantUsername}-${newRole}`);
+    try {
+      const updated = await updateParticipantRole({
+        meetingId: meeting._id,
+        participantUsername,
+        newRole,
+        username,
+      });
+      setMeeting(updated);
+    } catch (err) {
+      console.error("Failed to update role", err);
+      setRoleError(err.message || "Failed to update role");
+    } finally {
+      setRoleUpdating(null);
+    }
+  }
+
+  async function handleCloseVoting(motionId) {
+    if (!meeting || !code || !username) return;
+    try {
+      await apiCloseMotion({ code, motionId, username });
+      const refreshed = await getMeeting({ code });
+      setMeeting(refreshed);
+    } catch (err) {
+      console.error("Failed to close voting", err);
+      window.alert(err.message || "Failed to close voting");
     }
   }
 
@@ -233,13 +323,38 @@ export default function Meetings() {
               <div style={{ fontSize: "1.3rem", marginBottom: 16 }}>
                 <b>Meeting Code:</b> <code>{meeting.code}</code>
               </div>
+              <div style={{ fontSize: "0.95rem", color: "#555", marginBottom: 12 }}>
+                Your role in this meeting: <strong>{myRole}</strong>
+              </div>
               <div>
                 <b>Members:</b>
-                <ul style={{ marginTop: 8 }}>
+                {roleError && <div style={{ color: "red", fontSize: "0.85rem", marginTop: 4 }}>{roleError}</div>}
+                <ul style={{ marginTop: 8, paddingLeft: 16 }}>
                   {meeting.participants && meeting.participants.length > 0 ? (
-                    meeting.participants.map((p, i) => (
-                      <li key={i}>{p.username} {p.role && p.role !== "member" ? `(${p.role})` : ""}</li>
-                    ))
+                    meeting.participants.map((p) => {
+                      const label = p.displayName || p.username;
+                      const showRoleTag = p.role && p.role !== "member";
+                      const canEdit = myRole === "owner" && p.username !== username;
+                      return (
+                        <li key={p.username} style={{ marginBottom: 6 }}>
+                          <span>
+                            {label} {showRoleTag ? `(${p.role})` : ""}
+                          </span>
+                          {canEdit && (
+                            <select
+                              value={p.role}
+                              onChange={(e) => handleRoleChange(p.username, e.target.value)}
+                              disabled={Boolean(roleUpdating)}
+                              style={{ marginLeft: 12, padding: "2px 6px", borderRadius: 4 }}
+                            >
+                              <option value="chair">chair</option>
+                              <option value="member">member</option>
+                              <option value="observer">observer</option>
+                            </select>
+                          )}
+                        </li>
+                      );
+                    })
                   ) : (
                     <li>No participants yet</li>
                   )}
@@ -259,6 +374,16 @@ export default function Meetings() {
                     const replies = repliesByMotion[motionId] || [];
                     const userVote = getVoteChoice(motion.voterMap, username);
                     const selected = selectedMotionId === motionId;
+                    const isClosed = motion.status === "closed";
+                    const resultLabel =
+                      motion.outcome && motion.outcome !== "pending"
+                        ? motion.outcome.toUpperCase()
+                        : "PENDING";
+                    const typeLabel =
+                      motion.type === "procedure"
+                        ? `Procedural motion · requires ${motion.requiredPercentage || 66}%`
+                        : `Standard motion · requires ${motion.requiredPercentage || 50}%`;
+                    const displayTitle = motion.title || motion.text || "Untitled motion";
                     return (
                       <div
                         key={`motion-${motionId}-${i}`}
@@ -276,38 +401,81 @@ export default function Meetings() {
                           <span style={{ color: "#0582CA", fontWeight: 500 }}>
                             {new Date(motion.createdAt).toLocaleTimeString()}
                           </span>{" "}
-                          <b>Motion:</b> {motion.text} — <i>{motion.proposer}</i>
+                          <b>Motion:</b> {displayTitle} — <i>{motion.proposer}</i>
                         </div>
-                        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                        {motion.description && (
+                          <div style={{ marginBottom: 6, color: "#333" }}>
+                            {motion.description}
+                          </div>
+                        )}
+                        <div style={{ fontSize: "0.85rem", color: "#555", marginBottom: 6 }}>
+                          {typeLabel}
+                        </div>
+                        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                           <button
                             type="button"
-                            onClick={(e) => { e.stopPropagation(); toggleVote(motionId, "up"); }}
+                            disabled={isClosed}
+                            onClick={(e) => { e.stopPropagation(); if (!isClosed) toggleVote(motionId, "up"); }}
                             style={{
                               background: userVote === "up" ? "#0b8457" : "#e0f1ea",
                               color: userVote === "up" ? "#fff" : "#000",
                               border: "none",
                               padding: "6px 10px",
                               borderRadius: 6,
-                              cursor: "pointer"
+                              cursor: isClosed ? "not-allowed" : "pointer",
+                              opacity: isClosed ? 0.6 : 1,
                             }}
                           >
                             👍 {motion.votes?.up ?? 0}
                           </button>
                           <button
                             type="button"
-                            onClick={(e) => { e.stopPropagation(); toggleVote(motionId, "down"); }}
+                            disabled={isClosed}
+                            onClick={(e) => { e.stopPropagation(); if (!isClosed) toggleVote(motionId, "down"); }}
                             style={{
                               background: userVote === "down" ? "#b71c1c" : "#fdecea",
                               color: userVote === "down" ? "#fff" : "#000",
                               border: "none",
                               padding: "6px 10px",
                               borderRadius: 6,
-                              cursor: "pointer"
+                              cursor: isClosed ? "not-allowed" : "pointer",
+                              opacity: isClosed ? 0.6 : 1,
                             }}
                           >
                             👎 {motion.votes?.down ?? 0}
                           </button>
+                          {canManageMotions && !isClosed && (
+                            <button
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); handleCloseVoting(motionId); }}
+                              style={{
+                                borderRadius: 6,
+                                border: "1px solid #b71c1c",
+                                background: "#fff",
+                                color: "#b71c1c",
+                                padding: "6px 10px",
+                                fontWeight: 600,
+                                cursor: "pointer",
+                              }}
+                            >
+                              Close Voting
+                            </button>
+                          )}
+                          <span
+                            style={{
+                              marginLeft: "auto",
+                              fontWeight: 600,
+                              color: isClosed ? "#b71c1c" : "#0b8457",
+                            }}
+                          >
+                            {isClosed ? `Voting closed — ${resultLabel}` : "Voting open"}
+                          </span>
                         </div>
+                        {isClosed && (
+                          <div style={{ marginTop: 6, fontSize: "0.9rem", color: "#555" }}>
+                            Final tally: 👍 {motion.votes?.up ?? 0} / 👎 {motion.votes?.down ?? 0}
+                          </div>
+                        )}
                         {replies.length > 0 && (
                           <div style={{ marginTop: 8, marginLeft: 12 }}>
                             {replies.map((reply) => (
@@ -324,75 +492,172 @@ export default function Meetings() {
                     );
                   }
                   const msg = entry.item;
+                  const isSystem = (msg.author || "").toLowerCase() === "system";
                   return (
-                    <div key={`msg-${msg._id || i}`} style={{ marginBottom: 6 }}>
+                    <div
+                      key={`msg-${msg._id || i}`}
+                      style={{
+                        marginBottom: 6,
+                        fontStyle: isSystem ? "italic" : "normal",
+                        color: isSystem ? "#555" : "#000",
+                      }}
+                    >
                       <span style={{ color: "#0582CA", fontWeight: 500 }}>
                         {new Date(msg.createdAt).toLocaleTimeString()}
                       </span>{" "}
-                      <b>{msg.author || "Anon"}:</b> {msg.text}
+                      <b>{isSystem ? "System" : msg.author || "Anon"}:</b> {msg.text}
                     </div>
                   );
                 })}
                 <div ref={chatEndRef} />
               </div>
-              <form style={{ display: "flex", gap: 4 }} onSubmit={sendMessage}>
-                <input
-                  type="text"
-                  value={input}
-                  onChange={e => setInput(e.target.value)}
-                  placeholder="Type a message or motion..."
-                  style={{ flex: 1, borderRadius: 6, border: "1px solid #b0b0b0", padding: 6 }}
-                />
-                <button
-                  type="submit"
-                  style={{
-                    borderRadius: 6,
-                    background: "#0582CA",
-                    color: "#fff",
-                    border: "none",
-                    padding: "6px 14px",
-                    fontWeight: 600,
-                    cursor: "pointer"
-                  }}
+              <div
+                className="chat-footer"
+                style={{ borderTop: "1px solid #d0d7e5", paddingTop: 8, marginTop: 4 }}
+              >
+                <form
+                  className="chat-main-row"
+                  style={{ display: "flex", gap: 8 }}
+                  onSubmit={sendMessage}
                 >
-                  Send
-                </button>
-                <button
-                  type="button"
-                  onClick={raiseMotion}
-                  style={{
-                    borderRadius: 6,
-                    background: "#e53935",
-                    color: "#fff",
-                    border: "none",
-                    padding: "6px 14px",
-                    fontWeight: 600,
-                    cursor: "pointer"
-                  }}
+                  <input
+                    type="text"
+                    value={messageText}
+                    onChange={e => setMessageText(e.target.value)}
+                    placeholder="Type a message..."
+                    style={{ flex: 1, borderRadius: 6, border: "1px solid #b0b0b0", padding: 6 }}
+                  />
+                  <button
+                    type="submit"
+                    disabled={!canSend || !messageText.trim()}
+                    style={{
+                      borderRadius: 6,
+                      background: !messageText.trim() ? "#9fbfdc" : "#0582CA",
+                      color: "#fff",
+                      border: "none",
+                      padding: "6px 14px",
+                      fontWeight: 600,
+                      cursor: !messageText.trim() ? "not-allowed" : "pointer"
+                    }}
+                  >
+                    Send
+                  </button>
+                </form>
+                <div
+                  className="chat-secondary-row"
+                  style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 6, fontSize: "0.9rem" }}
                 >
-                  Raise a Motion
-                </button>
-                <button
-                  type="button"
-                  onClick={replyToMotion}
-                  disabled={!selectedMotionId || !input.trim()}
-                  style={{
-                    borderRadius: 6,
-                    background: !selectedMotionId || !input.trim() ? "#9fbfdc" : "#0077cc",
-                    color: "#fff",
-                    border: "none",
-                    padding: "6px 14px",
-                    fontWeight: 600,
-                    cursor: !selectedMotionId || !input.trim() ? "not-allowed" : "pointer"
-                  }}
-                >
-                  Reply
-                </button>
-              </form>
+                  {showRaiseButton && (
+                    <button
+                      type="button"
+                      onClick={openRaiseMotionModal}
+                      disabled={!canRaiseMotion}
+                      title={!canRaiseMotion ? "Only the chair or owner can raise motions." : undefined}
+                      style={{
+                        borderRadius: 6,
+                        background: !canRaiseMotion ? "#f4c8c8" : "#e53935",
+                        color: "#fff",
+                        border: "none",
+                        padding: "6px 12px",
+                        fontWeight: 600,
+                        cursor: !canRaiseMotion ? "not-allowed" : "pointer",
+                      }}
+                    >
+                      Raise Motion
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={replyToMotion}
+                    disabled={!canReply || !selectedMotionId || !messageText.trim()}
+                    title={
+                      !canReply
+                        ? "Observers cannot reply."
+                        : !selectedMotionId
+                        ? "Select a motion to reply to."
+                        : !messageText.trim()
+                        ? "Enter a reply message first."
+                        : undefined
+                    }
+                    style={{
+                      borderRadius: 6,
+                      background: !canReply || !selectedMotionId || !messageText.trim() ? "#9fbfdc" : "#0077cc",
+                      color: "#fff",
+                      border: "none",
+                      padding: "6px 12px",
+                      fontWeight: 600,
+                      cursor: !canReply || !selectedMotionId || !messageText.trim() ? "not-allowed" : "pointer",
+                    }}
+                  >
+                    Reply
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         )}
       </div>
+      <Dialog
+        isOpen={raiseModalOpen}
+        onClose={closeRaiseMotionModal}
+      >
+        <div className={Classes.DIALOG_HEADER}>
+          <h4>Raise Motion</h4>
+        </div>
+        <form onSubmit={submitMotion} id="raise-motion-form">
+          <div className={Classes.DIALOG_BODY}>
+            <FormGroup label="Motion title" labelFor="motion-title-input">
+              <input
+                id="motion-title-input"
+                className="bp4-input"
+                type="text"
+                value={motionTitleInput}
+                onChange={(e) => setMotionTitleInput(e.target.value)}
+                disabled={raisingMotion}
+                required
+                placeholder="e.g., Approve the budget for Q2"
+              />
+            </FormGroup>
+            <FormGroup label="Motion description (optional)" labelFor="motion-description-input">
+              <textarea
+                id="motion-description-input"
+                className="bp4-input"
+                rows={4}
+                value={motionDescriptionInput}
+                onChange={(e) => setMotionDescriptionInput(e.target.value)}
+                disabled={raisingMotion}
+                placeholder="Provide details, rationale, or conditions for this motion."
+              />
+            </FormGroup>
+            <FormGroup label="Motion type">
+              <RadioGroup
+                onChange={(e) => setMotionType(e.target.value)}
+                selectedValue={motionType}
+                inline
+              >
+                <Radio value="standard" label="Standard (50%)" />
+                <Radio value="procedure" label="Procedural (66%)" />
+              </RadioGroup>
+              <p style={{ marginTop: 4, color: "#555" }}>
+                Standard motions pass with &gt; 50% in favor. Procedural motions typically require at least two-thirds.
+              </p>
+            </FormGroup>
+            {motionError && (
+              <p style={{ color: "red", marginTop: 8 }}>{motionError}</p>
+            )}
+          </div>
+          <div className={Classes.DIALOG_FOOTER}>
+            <div className={Classes.DIALOG_FOOTER_ACTIONS}>
+              <BPButton onClick={closeRaiseMotionModal} disabled={raisingMotion}>
+                Cancel
+              </BPButton>
+              <BPButton intent="primary" type="submit" loading={raisingMotion}>
+                Submit Motion
+              </BPButton>
+            </div>
+          </div>
+        </form>
+      </Dialog>
     </>
   );
 }

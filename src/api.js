@@ -41,11 +41,11 @@ export async function listMeetings({ username, view = "my" }) {
   return res.json(); // { meetings }
 }
 
-export async function createMeeting({ title, username }) {
+export async function createMeeting({ title, username, displayName }) {
   const res = await fetch(`${API_BASE}/meetings`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ title, username }),
+    body: JSON.stringify({ title, username, displayName }),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.message || "Failed to create meeting");
@@ -59,22 +59,28 @@ export async function getMeeting({ code }) {
   return data.meeting || data; // normalize
 }
 
-export async function joinMeeting({ code, username }) {
-  const res = await fetch(`${API_BASE}/meetings/${code}/join`, {
+export async function joinMeeting({ code, username, displayName }) {
+  const res = await fetch(`${API_BASE}/meetings/join`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ username }),
+    body: JSON.stringify({ code, username, displayName }),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.message || "Failed to join");
-  return data.meeting;
+  return data;
 }
 
-export async function raiseMotion({ code, username, text }) {
+export async function raiseMotion({ code, username, title, description, text, type = "standard" }) {
   const res = await fetch(`${API_BASE}/meetings/${code}/motions`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ username, text }),
+    body: JSON.stringify({
+      username,
+      motionTitle: title ?? text,
+      motionDescription: description ?? "",
+      motionText: text ?? title ?? "",
+      motionType: type,
+    }),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.message || "Failed to raise motion");
@@ -101,4 +107,29 @@ export async function postMessage({ code, username, text, motionId }) {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.message || "Failed to send message");
   return data.message;
+}
+
+export async function updateParticipantRole({ meetingId, participantUsername, newRole, username }) {
+  const res = await fetch(
+    `${API_BASE}/meetings/${meetingId}/participants/${encodeURIComponent(participantUsername)}/role`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ newRole, username }),
+    }
+  );
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.message || "Failed to update role");
+  return data.meeting;
+}
+
+export async function closeMotion({ code, motionId, username }) {
+  const res = await fetch(`${API_BASE}/meetings/${code}/motions/${motionId}/close`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.message || "Failed to close motion");
+  return data.motion;
 }
