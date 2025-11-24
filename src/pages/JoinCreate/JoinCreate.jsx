@@ -19,16 +19,23 @@ export default function JoinCreate() {
   const [showCreate, setShowCreate] = useState(null);
   const [loadingList, setLoadingList] = useState(true);
   const [listError, setListError] = useState("");
+  const [copiedCode, setCopiedCode] = useState(null);
   const { user } = useAppContext();
   const navigate = useNavigate();
+  const username = user?.username || user?.email || "";
   
   useEffect(() => {
     let cancelled = false;
     async function load() {
+      if (!username) {
+        setMeetingList([]);
+        setLoadingList(false);
+        return;
+      }
       setLoadingList(true);
       setListError("");
       try {
-        const data = await listMeetings();
+        const data = await listMeetings({ username });
         if (!cancelled) {
           setMeetingList(data.meetings || []);
         }
@@ -43,12 +50,13 @@ export default function JoinCreate() {
     }
     load();
     return () => { cancelled = true; };
-  }, []);
+  }, [username]);
 
   async function refreshMeetings() {
+    if (!username) return;
     try {
       setListError("");
-      const data = await listMeetings();
+      const data = await listMeetings({ username });
       setMeetingList(data.meetings || []);
     } catch (err) {
       console.error("Failed to refresh meetings", err);
@@ -59,13 +67,13 @@ export default function JoinCreate() {
   async function handleJoin() {
     const code = window.prompt("Enter meeting code to join:");
     if (!code) return;
-    const username = user?.username || user?.email;
     if (!username) {
       window.alert("You must be logged in to join a meeting.");
       return;
     }
     try {
       const meeting = await apiJoinMeeting({ code: code.trim(), username });
+      await refreshMeetings();
       navigate("/Meetings", { state: { meeting, code: meeting?.code } });
     } catch (err) {
       console.error("Failed to join meeting", err);
@@ -74,7 +82,6 @@ export default function JoinCreate() {
   }
 
   async function handleCreate(meetingName) {
-    const username = user?.username || user?.email;
     if (!username) {
       throw new Error("You must be logged in to create a meeting");
     }
@@ -86,12 +93,24 @@ export default function JoinCreate() {
     await refreshMeetings();
     return meeting;
   }
+
+  async function handleCopyCode(code) {
+    if (!code) return;
+    try {
+      await navigator.clipboard.writeText(code);
+      setCopiedCode(code);
+      setTimeout(() => setCopiedCode(null), 1500);
+    } catch (err) {
+      console.error("Failed to copy code", err);
+      window.alert("Failed to copy code. Please copy it manually.");
+    }
+  }
   
   return (
     <>
       <Header />
       <div className="panel-header">
-        <h2 id="meeting-heading">Current Meetings</h2>
+        <h2 id="meeting-heading">My Meetings</h2>
         <h2 id="convo-heading">Convo</h2>
       </div>
       <div className="page-divider">
@@ -100,27 +119,47 @@ export default function JoinCreate() {
             <tr>
               <th scope="col">Meeting Name</th>
               <th scope="col">Code</th>
+              <th scope="col">Copy</th>
             </tr>
           </thead>
           <tbody id="meeting-list">
             {loadingList && (
               <tr>
-                <td colSpan={2} style={{ textAlign: "center", padding: "1rem" }}>
+                <td colSpan={3} style={{ textAlign: "center", padding: "1rem" }}>
                   Loading meetings...
                 </td>
               </tr>
             )}
             {!loadingList && meetingList.length === 0 && (
               <tr>
-                <td colSpan={2} style={{ textAlign: "center", padding: "1rem", color: "#666" }}>
+                <td colSpan={3} style={{ textAlign: "center", padding: "1rem", color: "#666" }}>
                   No meetings yet.
                 </td>
               </tr>
             )}
             {meetingList.map((meeting) => (
-              <tr key={meeting._id || meeting.code}>
+              <tr key={meeting._id || meeting.title}>
                 <td>{meeting.title || meeting.name}</td>
-                <td><code>{meeting.code}</code></td>
+                <td><code>{meeting.code || "—"}</code></td>
+                <td>
+                  <button
+                    type="button"
+                    className="copy-code-button"
+                    style={{
+                      padding: "4px 10px",
+                      fontSize: "0.85rem",
+                      borderRadius: 6,
+                      border: "1px solid #0582CA",
+                      background: copiedCode === meeting.code ? "#0582CA" : "#fff",
+                      color: copiedCode === meeting.code ? "#fff" : "#0582CA",
+                      fontWeight: 600,
+                      cursor: "pointer",
+                    }}
+                    onClick={() => handleCopyCode(meeting.code)}
+                  >
+                    {copiedCode === meeting.code ? "Copied!" : "Copy Code"}
+                  </button>
+                </td>
               </tr>
             ))}
           </tbody>

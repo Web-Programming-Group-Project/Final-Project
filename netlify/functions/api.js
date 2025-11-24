@@ -88,11 +88,6 @@ async function getMeetingByCode(code) {
   return Meeting.findOne({ code: (code || "").toUpperCase() });
 }
 
-app.get("/meetings", async (_req, res) => {
-  const meetings = await Meeting.find({}, { title: 1, code: 1, createdAt: 1 }).sort({ createdAt: -1 });
-  res.json({ meetings });
-});
-
 app.post("/meetings", async (req, res) => {
   const { title, username } = req.body || {};
   if (!title || !username) return res.status(400).json({ message: "title and username are required" });
@@ -107,11 +102,23 @@ app.post("/meetings", async (req, res) => {
   const meeting = new Meeting({
     title,
     code,
+    createdBy: username,
     participants: [{ username, role: "chair" }],
   });
 
   await meeting.save();
   res.json({ meeting });
+});
+
+app.get("/meetings", async (req, res) => {
+  const username = (req.query.username || "").trim();
+  if (!username) return res.status(400).json({ message: "username required" });
+
+  const meetings = await Meeting.find(
+    { $or: [{ createdBy: username }, { "participants.username": username }] },
+    { title: 1, createdBy: 1, createdAt: 1, code: 1 }
+  ).sort({ createdAt: -1 });
+  res.json({ meetings });
 });
 
 app.get("/meetings/:code", async (req, res) => {

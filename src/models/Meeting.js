@@ -34,8 +34,10 @@ const MeetingSchema = new mongoose.Schema(
   {
     title:   { type: String, required: true },
     code:    { type: String, required: true, unique: true },
+    createdBy: { type: String, required: true }, // username of creator
     creator: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: false },
     open:    { type: Boolean, default: true },
+    visibility: { type: String, enum: ["private"], default: "private" },
 
     participants: [ParticipantSchema],
     motions:      [MotionSchema],
