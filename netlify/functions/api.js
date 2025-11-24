@@ -392,6 +392,40 @@ async function openMotionRoute(req, res) {
 app.post("/meetings/:code/motions/:motionId/open", openMotionRoute);
 app.patch("/meetings/:code/motions/:motionId/open", openMotionRoute);
 
+app.post("/meetings/:meetingId/motions/:motionId/replies", async (req, res) => {
+  const { meetingId, motionId } = req.params;
+  const { text, stance, username, displayName } = req.body || {};
+
+  if (!username) return res.status(400).json({ message: "username is required" });
+  const trimmed = (text || "").trim();
+  if (!trimmed) return res.status(400).json({ message: "Reply text is required" });
+
+  const allowedStances = ["pro", "con", "neutral"];
+  const normalizedStance = allowedStances.includes(stance) ? stance : "neutral";
+
+  try {
+    const meeting = await Meeting.findById(meetingId);
+    if (!meeting) return res.status(404).json({ message: "Meeting not found" });
+
+    const motion = meeting.motions.id(motionId);
+    if (!motion) return res.status(404).json({ message: "Motion not found" });
+
+    motion.replies.push({
+      authorUsername: username,
+      authorDisplayName: displayName || username,
+      stance: normalizedStance,
+      text: trimmed,
+      createdAt: new Date(),
+    });
+
+    await meeting.save();
+    res.json({ motion });
+  } catch (err) {
+    console.error("Error adding motion reply", err);
+    res.status(500).json({ message: "Error adding reply", error: err.message });
+  }
+});
+
 app.patch("/meetings/:meetingId/participants/:participantUsername/role", async (req, res) => {
   const { meetingId, participantUsername } = req.params;
   const { newRole, username } = req.body || {};

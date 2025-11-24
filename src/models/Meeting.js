@@ -9,6 +9,22 @@ const MessageSchema = new mongoose.Schema(
   { _id: true, timestamps: true }
 );
 
+const ReplySchema = new mongoose.Schema(
+  {
+    authorUsername: { type: String, required: true },
+    authorDisplayName: { type: String, required: true },
+    stance: {
+      type: String,
+      enum: ["pro", "con", "neutral"],
+      default: "neutral",
+      required: true,
+    },
+    text: { type: String, required: true },
+    createdAt: { type: Date, default: Date.now },
+  },
+  { _id: true }
+);
+
 const MotionSchema = new mongoose.Schema(
   {
     proposer: { type: String, required: true },       // username
@@ -29,6 +45,7 @@ const MotionSchema = new mongoose.Schema(
     status: { type: String, enum: ["open", "closed"], default: "open" },
     outcome: { type: String, enum: ["pending", "passed", "failed"], default: "pending" },
     closedAt: { type: Date, default: null },
+    replies: { type: [ReplySchema], default: [] },
   },
   { _id: true, timestamps: true }
 );

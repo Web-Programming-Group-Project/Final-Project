@@ -17,6 +17,7 @@ import {
   postMessage as apiPostMessage,
   updateParticipantRole,
   closeMotion as apiCloseMotion,
+  addReplyToMotion,
 } from "../api";
 
 function getVoteChoice(voterMap, username) {
@@ -47,6 +48,10 @@ export default function Meetings() {
   const [motionDescriptionInput, setMotionDescriptionInput] = useState("");
   const [motionError, setMotionError] = useState("");
   const [raisingMotion, setRaisingMotion] = useState(false);
+  const [replyTextMap, setReplyTextMap] = useState({});
+  const [replyStanceMap, setReplyStanceMap] = useState({});
+  const [replyErrorMap, setReplyErrorMap] = useState({});
+  const [replySubmittingMap, setReplySubmittingMap] = useState({});
   const chatEndRef = useRef(null);
 
   const code = meeting?.code || initialCode;
@@ -100,20 +105,6 @@ export default function Meetings() {
       .sort((a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0));
   }, [meeting?.messages]);
 
-  const repliesByMotion = useMemo(() => {
-    const grouped = {};
-    (meeting?.messages || []).forEach((msg) => {
-      if (!msg.motionId) return;
-      const id = String(msg.motionId);
-      if (!grouped[id]) grouped[id] = [];
-      grouped[id].push(msg);
-    });
-    Object.values(grouped).forEach((list) => {
-      list.sort((a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0));
-    });
-    return grouped;
-  }, [meeting?.messages]);
-
   const timeline = useMemo(() => {
     const entries = [
       ...generalMessages.map((msg) => ({ type: "chat", createdAt: msg.createdAt, item: msg })),
@@ -127,7 +118,6 @@ export default function Meetings() {
   const canManageMotions = ["owner", "chair"].includes(myRole);
   const canRaiseMotion = ["owner", "chair"].includes(myRole);
   const showRaiseButton = myRole !== "observer";
-  const canReply = myRole !== "observer";
   const canSend = Boolean(username);
 
   async function sendMessage(e) {
@@ -226,27 +216,6 @@ export default function Meetings() {
     }
   }
 
-  async function replyToMotion() {
-    if (!selectedMotionId) return;
-    const text = messageText.trim();
-    if (!text || !meeting || !code) return;
-    if (!username) {
-      window.alert("You must be logged in to reply.");
-      return;
-    }
-    try {
-      const message = await apiPostMessage({ code, username, text, motionId: selectedMotionId });
-      setMeeting((prev) => {
-        if (!prev) return prev;
-        return { ...prev, messages: [...(prev.messages || []), message] };
-      });
-      setMessageText("");
-    } catch (err) {
-      console.error("Failed to reply", err);
-      window.alert(err.message || "Failed to reply to motion");
-    }
-  }
-
   async function handleRoleChange(participantUsername, newRole) {
     if (!meeting?._id || !username) return;
     setRoleError("");
@@ -276,6 +245,53 @@ export default function Meetings() {
     } catch (err) {
       console.error("Failed to close voting", err);
       window.alert(err.message || "Failed to close voting");
+    }
+  }
+
+  async function submitReply(motionId) {
+    if (!meeting?._id) {
+      setReplyErrorMap((prev) => ({ ...prev, [motionId]: "Meeting not loaded." }));
+      return;
+    }
+    if (!username) {
+      setReplyErrorMap((prev) => ({ ...prev, [motionId]: "You must be logged in to reply." }));
+      return;
+    }
+    const text = (replyTextMap[motionId] || "").trim();
+    if (!text) {
+      setReplyErrorMap((prev) => ({ ...prev, [motionId]: "Reply text is required." }));
+      return;
+    }
+    const stance = replyStanceMap[motionId] || "neutral";
+    setReplySubmittingMap((prev) => ({ ...prev, [motionId]: true }));
+    setReplyErrorMap((prev) => ({ ...prev, [motionId]: "" }));
+    try {
+      const displayName =
+        [user?.firstName, user?.lastName].filter(Boolean).join(" ").trim() ||
+        user?.username ||
+        user?.email ||
+        "User";
+      const updatedMotion = await addReplyToMotion({
+        meetingId: meeting._id,
+        motionId,
+        text,
+        stance,
+        displayName,
+        username,
+      });
+      setMeeting((prev) => {
+        if (!prev) return prev;
+        const motions = (prev.motions || []).map((m) =>
+          String(m._id) === String(updatedMotion._id) ? updatedMotion : m
+        );
+        return { ...prev, motions };
+      });
+      setReplyTextMap((prev) => ({ ...prev, [motionId]: "" }));
+      setReplyStanceMap((prev) => ({ ...prev, [motionId]: "neutral" }));
+    } catch (err) {
+      setReplyErrorMap((prev) => ({ ...prev, [motionId]: err.message || "Failed to add reply" }));
+    } finally {
+      setReplySubmittingMap((prev) => ({ ...prev, [motionId]: false }));
     }
   }
 
@@ -371,7 +387,7 @@ export default function Meetings() {
                   if (entry.type === "motion") {
                     const motion = entry.item;
                     const motionId = String(motion._id);
-                    const replies = repliesByMotion[motionId] || [];
+                    const replies = motion.replies || [];
                     const userVote = getVoteChoice(motion.voterMap, username);
                     const selected = selectedMotionId === motionId;
                     const isClosed = motion.status === "closed";
@@ -384,6 +400,10 @@ export default function Meetings() {
                         ? `Procedural motion · requires ${motion.requiredPercentage || 66}%`
                         : `Standard motion · requires ${motion.requiredPercentage || 50}%`;
                     const displayTitle = motion.title || motion.text || "Untitled motion";
+                    const replyText = replyTextMap[motionId] || "";
+                    const replyStance = replyStanceMap[motionId] || "neutral";
+                    const replyError = replyErrorMap[motionId];
+                    const replySubmitting = Boolean(replySubmittingMap[motionId]);
                     return (
                       <div
                         key={`motion-${motionId}-${i}`}
@@ -476,18 +496,106 @@ export default function Meetings() {
                             Final tally: 👍 {motion.votes?.up ?? 0} / 👎 {motion.votes?.down ?? 0}
                           </div>
                         )}
-                        {replies.length > 0 && (
-                          <div style={{ marginTop: 8, marginLeft: 12 }}>
-                            {replies.map((reply) => (
-                              <div key={reply._id} style={{ marginBottom: 6, padding: 6, borderRadius: 6, background: "#fff5f5", marginLeft: 12 }}>
-                                <div style={{ color: "#666", fontSize: "0.9rem" }}>
-                                  {new Date(reply.createdAt).toLocaleTimeString()} — <b>{reply.author}</b>
-                                </div>
-                                <div style={{ marginTop: 4 }}>{reply.text}</div>
-                              </div>
-                            ))}
+                        <div
+                          className="motion-reply-section"
+                          style={{ marginTop: 12, borderTop: "1px solid #f1c7c7", paddingTop: 8 }}
+                        >
+                          {replies.length > 0 && (
+                            <div className="motion-reply-list" style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 6 }}>
+                              {replies.map((reply) => {
+                                const stanceLabel =
+                                  reply.stance === "pro" ? "Pro" : reply.stance === "con" ? "Con" : "Neutral";
+                                const stanceStyles = {
+                                  pro: { background: "#e6ffed", color: "#137333" },
+                                  con: { background: "#ffe6e6", color: "#b00020" },
+                                  neutral: { background: "#f3f3f3", color: "#555" },
+                                };
+                                const stanceStyle = stanceStyles[reply.stance] || stanceStyles.neutral;
+                                const replyAuthor =
+                                  reply.authorDisplayName ||
+                                  reply.authorUsername ||
+                                  reply.author ||
+                                  "Unknown";
+                                return (
+                                  <div
+                                    key={reply._id || reply.createdAt}
+                                    className={`motion-reply motion-reply--${reply.stance}`}
+                                    style={{ padding: 6, borderRadius: 6, background: "#fff5f5" }}
+                                  >
+                                    <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "0.85rem", marginBottom: 4 }}>
+                                      <span style={{ fontWeight: 600 }}>{replyAuthor}</span>
+                                      <span
+                                        className="motion-reply-stance-tag"
+                                        style={{
+                                          padding: "0.1rem 0.5rem",
+                                          borderRadius: 999,
+                                          fontSize: "0.75rem",
+                                          ...stanceStyle,
+                                        }}
+                                      >
+                                        {stanceLabel}
+                                      </span>
+                                      <span style={{ marginLeft: "auto", color: "#666" }}>
+                                        {reply.createdAt ? new Date(reply.createdAt).toLocaleTimeString() : ""}
+                                      </span>
+                                    </div>
+                                    <div style={{ color: "#333" }}>{reply.text}</div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                          <div
+                            className="motion-reply-input-row"
+                            style={{ display: "flex", gap: 8, alignItems: "center" }}
+                          >
+                            <input
+                              type="text"
+                              className="motion-reply-input"
+                              placeholder="Reply to this motion..."
+                              value={replyText}
+                              onChange={(e) =>
+                                setReplyTextMap((prev) => ({ ...prev, [motionId]: e.target.value }))
+                              }
+                              style={{ flex: 1, borderRadius: 6, border: "1px solid #b0b0b0", padding: 6 }}
+                            />
+                            <select
+                              className="motion-reply-stance-select"
+                              value={replyStance}
+                              onChange={(e) =>
+                                setReplyStanceMap((prev) => ({ ...prev, [motionId]: e.target.value }))
+                              }
+                              style={{ borderRadius: 6, border: "1px solid #b0b0b0", padding: "6px 8px" }}
+                            >
+                              <option value="neutral">Neutral</option>
+                              <option value="pro">Pro</option>
+                              <option value="con">Con</option>
+                            </select>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                submitReply(motionId);
+                              }}
+                              disabled={replySubmitting || !replyText.trim()}
+                              style={{
+                                borderRadius: 6,
+                                background: !replyText.trim() ? "#9fbfdc" : "#0582CA",
+                                color: "#fff",
+                                border: "none",
+                                padding: "6px 12px",
+                                fontWeight: 600,
+                                cursor: !replyText.trim() ? "not-allowed" : "pointer",
+                                opacity: replySubmitting ? 0.6 : 1,
+                              }}
+                            >
+                              {replySubmitting ? "Replying..." : "Reply"}
+                            </button>
                           </div>
-                        )}
+                          {replyError && (
+                            <div style={{ color: "red", fontSize: "0.85rem", marginTop: 4 }}>{replyError}</div>
+                          )}
+                        </div>
                       </div>
                     );
                   }
@@ -566,31 +674,6 @@ export default function Meetings() {
                       Raise Motion
                     </button>
                   )}
-                  <button
-                    type="button"
-                    onClick={replyToMotion}
-                    disabled={!canReply || !selectedMotionId || !messageText.trim()}
-                    title={
-                      !canReply
-                        ? "Observers cannot reply."
-                        : !selectedMotionId
-                        ? "Select a motion to reply to."
-                        : !messageText.trim()
-                        ? "Enter a reply message first."
-                        : undefined
-                    }
-                    style={{
-                      borderRadius: 6,
-                      background: !canReply || !selectedMotionId || !messageText.trim() ? "#9fbfdc" : "#0077cc",
-                      color: "#fff",
-                      border: "none",
-                      padding: "6px 12px",
-                      fontWeight: 600,
-                      cursor: !canReply || !selectedMotionId || !messageText.trim() ? "not-allowed" : "pointer",
-                    }}
-                  >
-                    Reply
-                  </button>
                 </div>
               </div>
             </div>

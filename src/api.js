@@ -133,3 +133,14 @@ export async function closeMotion({ code, motionId, username }) {
   if (!res.ok) throw new Error(data.message || "Failed to close motion");
   return data.motion;
 }
+
+export async function addReplyToMotion({ meetingId, motionId, text, stance, displayName, username }) {
+  const res = await fetch(`${API_BASE}/meetings/${meetingId}/motions/${motionId}/replies`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text, stance, displayName, username }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.message || "Failed to add reply");
+  return data.motion;
+}
