@@ -85,12 +85,11 @@ function makeCode() {
 }
 
 function sanitizeForFilename(value) {
-  return (value || "")
+  const safe = (value || "")
     .toLowerCase()
-    .replace(/[^a-z0-9\s_-]/g, "")
-    .trim()
-    .replace(/\s+/g, "_")
-    .replace(/_+/g, "_");
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return safe || "meeting";
 }
 
 async function getMeetingByCode(code) {
@@ -471,10 +470,20 @@ async function closeMotionRoute(req, res) {
   if (motion.isOverturn && passed) {
     const targetMotion = mtg.motions.id(motion.targetMotionId);
     if (targetMotion) {
+      const previousOutcome =
+        targetMotion.originalOutcome ||
+        targetMotion.outcome ||
+        (targetMotion.status === "closed" ? targetMotion.outcome : "pending") ||
+        "pending";
+      if (!targetMotion.originalOutcome) {
+        targetMotion.originalOutcome = previousOutcome;
+      }
       targetMotion.outcome = "overturned";
+      targetMotion.overturned = true;
+      targetMotion.updatedAt = new Date();
       targetMotion.overturnedByMotionId = motion._id;
       const targetTitle = targetMotion.title || targetMotion.text || "Untitled motion";
-      const overturnMsg = `The decision on "${targetTitle}" was OVERTURNED by motion "${displayTitle}".`;
+      const overturnMsg = `The decision on "${targetTitle}" was OVERTURNED by motion "${displayTitle}" (${up} in favor, ${down} against).`;
       mtg.messages.push({
         author: "System",
         text: overturnMsg,
@@ -542,17 +551,15 @@ app.get("/meetings/:code/export", async (req, res) => {
   const participantLines = (mtg.participants || []).map(
     (p) => `- ${p.displayName || p.username} (${p.role})`
   );
-  const titleSlug = sanitizeForFilename(mtg.title);
-  const minutesFilename = titleSlug
-    ? `minutes_${titleSlug}.txt`
-    : `minutes_${mtg.code || "meeting"}.txt`;
+  const safeName = sanitizeForFilename(mtg.title || mtg.code || "meeting");
+  const minutesFilename = `${safeName}-minutes.txt`;
 
   const motionLines = (mtg.motions || []).map((motion, idx) => {
     const motionTitle = motion.title || motion.text || "Untitled motion";
     const required = motion.requiredPercentage || (motion.type === "procedure" ? 66 : 50);
     const up = motion.votes?.up || 0;
     const down = motion.votes?.down || 0;
-    const outcome =
+    const outcomeRaw =
       motion.status === "closed"
         ? (motion.outcome || "pending").toUpperCase()
         : "PENDING";
@@ -567,7 +574,20 @@ app.get("/meetings/:code/export", async (req, res) => {
       (mtg.motions || []).find(
         (m) => String(m._id) === String(motion.targetMotionId)
       );
-    const outcomeLabel = overturnedByMotion ? `${outcome} — OVERTURNED` : outcome;
+    const outcomeLabel = outcomeRaw;
+    let outcomeDescription = outcomeRaw;
+    if (
+      motion.overturned ||
+      (motion.outcome || "").toLowerCase() === "overturned" ||
+      overturnedByMotion
+    ) {
+      const previousOutcome = (motion.originalOutcome || outcomeRaw).toUpperCase();
+      const overTitle = overturnedByMotion?.title || overturnedByMotion?.text || "Overturn motion";
+      outcomeDescription = `${previousOutcome} (later OVERTURNED by "${overTitle}")`;
+    } else if (motion.isOverturn && targetMotion) {
+      const targetTitle = targetMotion.title || targetMotion.text || "Previous motion";
+      outcomeDescription = `${outcomeLabel}. Targeted "${targetTitle}"`;
+    }
     const decisionSummary = (motion.decisionSummary || "").trim();
 
     const replies = motion.replies || [];
@@ -591,20 +611,18 @@ app.get("/meetings/:code/export", async (req, res) => {
     const discussionBlock = [...repliesLog, ...discussionMessages];
 
     const lines = [
-      `${idx + 1}. ${motionTitle}`,
+      `${idx + 1}. ${motionTitle} — ${outcomeDescription}. Final tally: ${up} in favor, ${down} against.`,
       `   • Type: ${motion.type || "standard"} (requires ${required}%)`,
-      `   • Outcome: ${outcomeLabel} — 👍 ${up} / 👎 ${down}`,
     ];
     if (decisionSummary) {
       lines.push(`   • Decision summary: ${decisionSummary}`);
     }
-    if (overturnedByMotion) {
-      const overTitle = overturnedByMotion.title || overturnedByMotion.text || "Overturn motion";
-      lines.push(`   • Overturned by: ${overTitle}`);
-    }
-    if (targetMotion) {
+    if (motion.isOverturn && targetMotion) {
       const targetTitle = targetMotion.title || targetMotion.text || "Previous motion";
       lines.push(`   • Overturning: ${targetTitle}`);
+    } else if (motion.outcome === "overturned" && overturnedByMotion) {
+      const overTitle = overturnedByMotion.title || overturnedByMotion.text || "Overturn motion";
+      lines.push(`   • Overturned by: ${overTitle}`);
     }
     lines.push("   • Pros:");
     if (prosReplies.length === 0) {

@@ -61,6 +61,8 @@ const MotionSchema = new mongoose.Schema(
     isOverturn: { type: Boolean, default: false },
     targetMotionId: { type: mongoose.Schema.Types.ObjectId, default: null },
     overturnedByMotionId: { type: mongoose.Schema.Types.ObjectId, default: null },
+    overturned: { type: Boolean, default: false },
+    originalOutcome: { type: String, default: "" },
   },
   { _id: true, timestamps: true }
 );

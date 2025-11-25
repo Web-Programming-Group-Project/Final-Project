@@ -26,17 +26,16 @@ import {
 function sanitizeTitleForFilename(value) {
   return (value || "")
     .toLowerCase()
-    .replace(/[^a-z0-9\s_-]/g, "")
-    .trim()
-    .replace(/\s+/g, "_")
-    .replace(/_+/g, "_");
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
 }
 
 function buildMinutesFilename(meeting) {
-  const slug = sanitizeTitleForFilename(meeting?.title);
-  if (slug) return `minutes_${slug}.txt`;
-  const fallbackCode = meeting?.code || "meeting";
-  return `minutes_${fallbackCode}.txt`;
+  const slug =
+    sanitizeTitleForFilename(meeting?.title) ||
+    sanitizeTitleForFilename(meeting?.code) ||
+    "meeting";
+  return `${slug}-minutes.txt`;
 }
 
 function getVoteChoice(voterMap, username) {
@@ -200,7 +199,7 @@ export default function Meetings() {
   function userCanOverturnMotion(motion) {
     if (!motion || !username) return false;
     if (motion.isOverturn) return false;
-    if (motion.overturnedByMotionId) return false;
+    if (motion.overturned || motion.overturnedByMotionId) return false;
     if ((motion.votingMode || "named") !== "named") return false;
     if (motion.status !== "closed") return false;
     const normalizedOutcome = (motion.outcome || "pending").toLowerCase();
@@ -683,10 +682,17 @@ export default function Meetings() {
                       const overturnedByMotion = motion.overturnedByMotionId
                         ? motionsById.get(String(motion.overturnedByMotionId))
                         : null;
-                      const isOverturned = Boolean(overturnedByMotion);
-                      let outcomeLabel = (motion.outcome || "pending").toUpperCase();
+                      const isOverturned =
+                        Boolean(
+                          motion.overturned ||
+                            (motion.outcome || "").toLowerCase() === "overturned" ||
+                            overturnedByMotion
+                        ) && !motion.isOverturn;
+                      let outcomeLabel = (
+                        motion.originalOutcome || motion.outcome || "pending"
+                      ).toUpperCase();
                       if (isOverturned) {
-                        outcomeLabel = `${outcomeLabel} — OVERTURNED`;
+                        outcomeLabel = `${outcomeLabel} (OVERTURNED)`;
                       } else if (
                         motion.isOverturn &&
                         motion.targetMotionId &&
@@ -718,9 +724,12 @@ export default function Meetings() {
                           <div style={{ color: "#5a637d", fontSize: "0.85rem" }}>
                             Final tally: 👍 {up} / 👎 {down}
                           </div>
-                          {isOverturned && (
+                          {isOverturned && !motion.isOverturn && (
                             <div style={{ marginTop: 4, color: "#b00020", fontSize: "0.85rem" }}>
-                              Overturned by: {overturnedByMotion?.title || overturnedByMotion?.text || "Overturn motion"}
+                              Overturned by:{" "}
+                              {overturnedByMotion?.title ||
+                                overturnedByMotion?.text ||
+                                "Overturn motion"}
                             </div>
                           )}
                           {hasSummary && (
@@ -831,6 +840,7 @@ export default function Meetings() {
                       motion.outcome && normalizedOutcome !== "pending"
                         ? motion.outcome.toUpperCase()
                         : "PENDING";
+                    let resultSuffix = "";
                     const votingMode = motion.votingMode || "named";
                     const anonymousVoters = motion.anonymousVotedUsers || [];
                     const userVote = votingMode === "named" ? getVoteChoice(motion.voterMap, username) : null;
@@ -853,18 +863,28 @@ export default function Meetings() {
                       !username ||
                       isClosed ||
                       (votingMode === "anonymous" && userVotedAnonymous);
-                    const canOverturnThisMotion = userCanOverturnMotion(motion);
                     const overturnedByMotion = motion.overturnedByMotionId
                       ? motionsById.get(String(motion.overturnedByMotionId))
                       : null;
+                    const isMotionOverturned =
+                      Boolean(
+                        motion.overturned ||
+                          (motion.outcome || "").toLowerCase() === "overturned" ||
+                          overturnedByMotion
+                      ) && !motion.isOverturn;
+                    const canOverturnThisMotion = userCanOverturnMotion(motion);
                     const overturnTargetMotionDetails =
                       motion.isOverturn && motion.targetMotionId
                         ? motionsById.get(String(motion.targetMotionId))
                         : null;
-                    if (motion.overturnedByMotionId) {
-                      resultLabel = `${resultLabel} — OVERTURNED`;
+                    if (isMotionOverturned) {
+                      resultLabel = "OVERTURNED";
+                      const prevOutcomeLabel = (motion.originalOutcome || "passed").toUpperCase();
+                      resultSuffix = ` (was ${prevOutcomeLabel})`;
+                    } else if (motion.overturnedByMotionId) {
+                      resultSuffix = " — OVERTURNED";
                     } else if (motion.isOverturn && normalizedOutcome !== "pending") {
-                      resultLabel = `${resultLabel} (Overturn)`;
+                    	resultSuffix = " (Overturn)";
                     }
                     return (
                       <div
@@ -963,7 +983,7 @@ export default function Meetings() {
                               color: isClosed ? "#b71c1c" : "#0b8457",
                             }}
                           >
-                            {isClosed ? `Voting closed — ${resultLabel}` : "Voting open"}
+                            {isClosed ? `Voting closed — ${resultLabel}${resultSuffix}` : "Voting open"}
                           </span>
                         </div>
                         {isClosed && (
@@ -993,9 +1013,12 @@ export default function Meetings() {
                             </button>
                           </div>
                         )}
-                        {overturnedByMotion && (
+                        {isMotionOverturned && overturnedByMotion && (
                           <div style={{ marginTop: 8, fontSize: "0.85rem", color: "#b00020" }}>
-                            Overturned by: {overturnedByMotion.title || overturnedByMotion.text || "Overturn motion"}
+                            Overturned by:{" "}
+                            {overturnedByMotion?.title ||
+                              overturnedByMotion?.text ||
+                              "Overturn motion"}
                           </div>
                         )}
                         {motion.isOverturn && overturnTargetMotionDetails && (
