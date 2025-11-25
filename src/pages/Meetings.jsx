@@ -20,6 +20,7 @@ import {
   addReplyToMotion,
   updateMeetingSummary as apiUpdateMeetingSummary,
   downloadMeetingMinutes as apiDownloadMeetingMinutes,
+  createOverturnMotion as apiCreateOverturnMotion,
 } from "../api";
 
 function sanitizeTitleForFilename(value) {
@@ -84,12 +85,11 @@ export default function Meetings() {
   const [meetingSummaryError, setMeetingSummaryError] = useState("");
   const [previousDetailsExpanded, setPreviousDetailsExpanded] = useState({});
   const [downloadingMinutes, setDownloadingMinutes] = useState(false);
+  const [overturnTargetMotionId, setOverturnTargetMotionId] = useState(null);
   const chatEndRef = useRef(null);
 
   const code = meeting?.code || initialCode;
   const username = user?.username || user?.email;
-  const closeVotingModalOpen = Boolean(closeVotingModalMotion);
-  const closingMotion = closeVotingModalMotion;
 
   useEffect(() => {
     if (!code) {
@@ -133,6 +133,16 @@ export default function Meetings() {
     }
   }, [meeting?.messages, meeting?.motions]);
 
+  useEffect(() => {
+    if (!overturnTargetMotionId) return;
+    const exists = (meeting?.motions || []).some(
+      (motion) => String(motion._id) === String(overturnTargetMotionId)
+    );
+    if (!exists) {
+      setOverturnTargetMotionId(null);
+    }
+  }, [meeting?.motions, overturnTargetMotionId]);
+
   const generalMessages = useMemo(() => {
     return (meeting?.messages || [])
       .filter((msg) => !msg.motionId)
@@ -146,6 +156,14 @@ export default function Meetings() {
     ];
     return entries.sort((a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0));
   }, [generalMessages, meeting?.motions]);
+
+  const motionsById = useMemo(() => {
+    const map = new Map();
+    (meeting?.motions || []).forEach((motion) => {
+      map.set(String(motion._id), motion);
+    });
+    return map;
+  }, [meeting?.motions]);
 
   const meetingSummaryText = (meeting?.meetingSummary || "").trim();
   const meetingSummaryButtonLabel = meetingSummaryText ? "Edit Meeting Summary" : "Add Meeting Summary";
@@ -164,12 +182,32 @@ export default function Meetings() {
       );
   }, [meeting?.motions]);
 
+  const overturnTargetMotion = overturnTargetMotionId
+    ? motionsById.get(String(overturnTargetMotionId))
+    : null;
+  const isOverturnMode = Boolean(overturnTargetMotionId);
+  const closeVotingModalOpen = Boolean(closeVotingModalMotion);
+  const closingMotion = closeVotingModalMotion;
+  const raiseDialogTitle = isOverturnMode ? "Overturn Decision" : "Raise Motion";
+  const raiseSubmitLabel = isOverturnMode ? "Submit Overturn Motion" : "Submit Motion";
+
   const myRole =
     meeting?.participants?.find((p) => p.username === username)?.role || "member";
   const canManageMotions = ["owner", "chair"].includes(myRole);
   const canRaiseMotion = ["owner", "chair"].includes(myRole);
   const showRaiseButton = myRole !== "observer";
   const canSend = Boolean(username);
+  function userCanOverturnMotion(motion) {
+    if (!motion || !username) return false;
+    if (motion.isOverturn) return false;
+    if (motion.overturnedByMotionId) return false;
+    if ((motion.votingMode || "named") !== "named") return false;
+    if (motion.status !== "closed") return false;
+    const normalizedOutcome = (motion.outcome || "pending").toLowerCase();
+    if (normalizedOutcome !== "passed") return false;
+    const voteChoice = getVoteChoice(motion.voterMap, username);
+    return voteChoice === "up";
+  }
 
   async function sendMessage(e) {
     e.preventDefault();
@@ -199,20 +237,39 @@ export default function Meetings() {
     setMotionError("");
     setMotionType("standard");
     setMotionVotingMode("named");
+    setOverturnTargetMotionId(null);
+    setRaiseModalOpen(true);
+  }
+
+  function openOverturnMotionModal(motion) {
+    if (!motion) return;
+    const baseTitle = motion.title || motion.text || "Untitled motion";
+    setOverturnTargetMotionId(String(motion._id));
+    setMotionTitleInput(`Overturn: ${baseTitle}`);
+    setMotionDescriptionInput(`Motion to overturn the previous decision on "${baseTitle}".`);
+    setMotionError("");
+    setMotionType("procedure");
+    setMotionVotingMode("named");
     setRaiseModalOpen(true);
   }
 
   function closeRaiseMotionModal() {
     if (raisingMotion) return;
     setRaiseModalOpen(false);
+    setOverturnTargetMotionId(null);
   }
 
   async function submitMotion(e) {
     e.preventDefault();
-    if (!canRaiseMotion) return;
+    const isOverturn = isOverturnMode;
+    if (!meeting || !code) {
+      setMotionError("Meeting not loaded.");
+      return;
+    }
+    if (!isOverturn && !canRaiseMotion) return;
     const title = motionTitleInput.trim();
     const description = motionDescriptionInput.trim();
-    if (!title || !meeting || !code) {
+    if (!title) {
       setMotionError("Motion title is required.");
       return;
     }
@@ -220,26 +277,48 @@ export default function Meetings() {
       setMotionError("You must be logged in to raise a motion.");
       return;
     }
+    if (isOverturn && !overturnTargetMotion) {
+      setMotionError("Target motion not found.");
+      return;
+    }
     setRaisingMotion(true);
     setMotionError("");
     try {
-      const motion = await apiRaiseMotion({
-        code,
-        username,
-        title,
-        description,
-        type: motionType,
-        votingMode: motionVotingMode,
-      });
-      setMeeting((prev) => {
-        if (!prev) return prev;
-        return { ...prev, motions: [...(prev.motions || []), motion] };
-      });
-      setSelectedMotionId(String(motion._id));
+      if (isOverturn) {
+        const response = await apiCreateOverturnMotion({
+          meetingId: meeting._id,
+          username,
+          targetMotionId: overturnTargetMotion._id,
+          title,
+          description,
+          motionType,
+          votingMode: motionVotingMode,
+        });
+        const updatedMeeting = response.meeting || response;
+        setMeeting(updatedMeeting);
+        if (response.motion?._id) {
+          setSelectedMotionId(String(response.motion._id));
+        }
+      } else {
+        const motion = await apiRaiseMotion({
+          code,
+          username,
+          title,
+          description,
+          type: motionType,
+          votingMode: motionVotingMode,
+        });
+        setMeeting((prev) => {
+          if (!prev) return prev;
+          return { ...prev, motions: [...(prev.motions || []), motion] };
+        });
+        setSelectedMotionId(String(motion._id));
+      }
       setMotionTitleInput("");
       setMotionDescriptionInput("");
       setMotionType("standard");
       setMotionVotingMode("named");
+      setOverturnTargetMotionId(null);
       setRaiseModalOpen(false);
     } catch (err) {
       console.error("Failed to raise motion", err);
@@ -601,6 +680,21 @@ export default function Meetings() {
                       const expanded = Boolean(previousDetailsExpanded[motionId]);
                       const up = motion.votes?.up ?? 0;
                       const down = motion.votes?.down ?? 0;
+                      const overturnedByMotion = motion.overturnedByMotionId
+                        ? motionsById.get(String(motion.overturnedByMotionId))
+                        : null;
+                      const isOverturned = Boolean(overturnedByMotion);
+                      let outcomeLabel = (motion.outcome || "pending").toUpperCase();
+                      if (isOverturned) {
+                        outcomeLabel = `${outcomeLabel} — OVERTURNED`;
+                      } else if (
+                        motion.isOverturn &&
+                        motion.targetMotionId &&
+                        outcomeLabel !== "PENDING"
+                      ) {
+                        outcomeLabel = `${outcomeLabel} (Overturn)`;
+                      }
+                      const canOverturnFromList = userCanOverturnMotion(motion);
                       return (
                         <div
                           key={`decision-${motionId}`}
@@ -618,16 +712,39 @@ export default function Meetings() {
                               {motion.title || motion.text || "Untitled motion"}
                             </div>
                             <span style={{ color: "#5a637d" }}>
-                              Outcome: {(motion.outcome || "pending").toUpperCase()}
+                              Outcome: {outcomeLabel}
                             </span>
                           </div>
                           <div style={{ color: "#5a637d", fontSize: "0.85rem" }}>
                             Final tally: 👍 {up} / 👎 {down}
                           </div>
+                          {isOverturned && (
+                            <div style={{ marginTop: 4, color: "#b00020", fontSize: "0.85rem" }}>
+                              Overturned by: {overturnedByMotion?.title || overturnedByMotion?.text || "Overturn motion"}
+                            </div>
+                          )}
                           {hasSummary && (
                             <div style={{ marginTop: 4, color: "#2f3b61" }}>
                               <strong>Summary:</strong> {summaryText}
                             </div>
+                          )}
+                          {canOverturnFromList && (
+                            <button
+                              type="button"
+                              onClick={() => openOverturnMotionModal(motion)}
+                              style={{
+                                marginTop: 8,
+                                borderRadius: 6,
+                                border: "1px solid #174ea6",
+                                background: "#fff",
+                                color: "#174ea6",
+                                padding: "4px 10px",
+                                fontWeight: 600,
+                                cursor: "pointer",
+                              }}
+                            >
+                              Overturn decision
+                            </button>
                           )}
                           {hasProsCons && (
                             <button
@@ -709,8 +826,9 @@ export default function Meetings() {
                     const replies = motion.replies || [];
                     const selected = selectedMotionId === motionId;
                     const isClosed = motion.status === "closed";
-                    const resultLabel =
-                      motion.outcome && motion.outcome !== "pending"
+                    const normalizedOutcome = (motion.outcome || "pending").toLowerCase();
+                    let resultLabel =
+                      motion.outcome && normalizedOutcome !== "pending"
                         ? motion.outcome.toUpperCase()
                         : "PENDING";
                     const votingMode = motion.votingMode || "named";
@@ -735,6 +853,19 @@ export default function Meetings() {
                       !username ||
                       isClosed ||
                       (votingMode === "anonymous" && userVotedAnonymous);
+                    const canOverturnThisMotion = userCanOverturnMotion(motion);
+                    const overturnedByMotion = motion.overturnedByMotionId
+                      ? motionsById.get(String(motion.overturnedByMotionId))
+                      : null;
+                    const overturnTargetMotionDetails =
+                      motion.isOverturn && motion.targetMotionId
+                        ? motionsById.get(String(motion.targetMotionId))
+                        : null;
+                    if (motion.overturnedByMotionId) {
+                      resultLabel = `${resultLabel} — OVERTURNED`;
+                    } else if (motion.isOverturn && normalizedOutcome !== "pending") {
+                      resultLabel = `${resultLabel} (Overturn)`;
+                    }
                     return (
                       <div
                         key={`motion-${motionId}-${i}`}
@@ -838,6 +969,38 @@ export default function Meetings() {
                         {isClosed && (
                           <div style={{ marginTop: 6, fontSize: "0.9rem", color: "#555" }}>
                             Final tally: 👍 {motion.votes?.up ?? 0} / 👎 {motion.votes?.down ?? 0}
+                          </div>
+                        )}
+                        {canOverturnThisMotion && (
+                          <div style={{ marginTop: 8 }}>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openOverturnMotionModal(motion);
+                              }}
+                              style={{
+                                borderRadius: 6,
+                                border: "1px solid #174ea6",
+                                background: "#fff",
+                                color: "#174ea6",
+                                padding: "6px 12px",
+                                fontWeight: 600,
+                                cursor: "pointer",
+                              }}
+                            >
+                              Overturn decision
+                            </button>
+                          </div>
+                        )}
+                        {overturnedByMotion && (
+                          <div style={{ marginTop: 8, fontSize: "0.85rem", color: "#b00020" }}>
+                            Overturned by: {overturnedByMotion.title || overturnedByMotion.text || "Overturn motion"}
+                          </div>
+                        )}
+                        {motion.isOverturn && overturnTargetMotionDetails && (
+                          <div style={{ marginTop: 8, fontSize: "0.85rem", color: "#333" }}>
+                            Targeting: {overturnTargetMotionDetails.title || overturnTargetMotionDetails.text || "Untitled motion"}
                           </div>
                         )}
                         {isClosed && votingMode === "named" && (
@@ -1194,10 +1357,27 @@ export default function Meetings() {
         onClose={closeRaiseMotionModal}
       >
         <div className={Classes.DIALOG_HEADER}>
-          <h4>Raise Motion</h4>
+          <h4>{raiseDialogTitle}</h4>
         </div>
         <form onSubmit={submitMotion} id="raise-motion-form">
           <div className={Classes.DIALOG_BODY}>
+            {isOverturnMode && (
+              <div
+                style={{
+                  background: "#fff4e5",
+                  border: "1px solid #ffc46b",
+                  borderRadius: 6,
+                  padding: 10,
+                  marginBottom: 16,
+                  color: "#5f370e",
+                  fontSize: "0.9rem",
+                }}
+              >
+                This motion will overturn the previous decision on{" "}
+                <strong>{overturnTargetMotion?.title || overturnTargetMotion?.text || "Untitled motion"}</strong>. Only members
+                who voted in favor can initiate this action.
+              </div>
+            )}
             <FormGroup label="Motion title" labelFor="motion-title-input">
               <input
                 id="motion-title-input"
@@ -1226,6 +1406,7 @@ export default function Meetings() {
                 onChange={(e) => setMotionType(e.target.value)}
                 selectedValue={motionType}
                 inline
+                disabled={isOverturnMode}
               >
                 <Radio value="standard" label="Standard (50%)" />
                 <Radio value="procedure" label="Procedural (66%)" />
@@ -1254,7 +1435,7 @@ export default function Meetings() {
                 Cancel
               </BPButton>
               <BPButton intent="primary" type="submit" loading={raisingMotion}>
-                Submit Motion
+                {raiseSubmitLabel}
               </BPButton>
             </div>
           </div>

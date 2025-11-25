@@ -335,6 +335,76 @@ app.post("/meetings/:code/motions/:motionId/vote", async (req, res) => {
   await mtg.save();
   res.json({ motion });
 });
+function getNamedVote(motion, username) {
+  if (!motion || !username) return null;
+  const voterMap = motion.voterMap;
+  if (!voterMap) return null;
+  if (typeof voterMap.get === "function") {
+    return voterMap.get(username);
+  }
+  return voterMap[username] || null;
+}
+
+app.post("/meetings/:meetingId/motions/overturn", async (req, res) => {
+  const { meetingId } = req.params;
+  const { username, targetMotionId, title, description, motionType, votingMode } = req.body || {};
+  if (!meetingId || !username || !targetMotionId || !title) {
+    return res.status(400).json({ message: "meetingId, username, title, and targetMotionId are required" });
+  }
+
+  const meeting = await Meeting.findById(meetingId);
+  if (!meeting) return res.status(404).json({ message: "Meeting not found" });
+
+  const targetMotion = meeting.motions.id(targetMotionId);
+  if (!targetMotion) {
+    return res.status(404).json({ message: "Target motion not found" });
+  }
+  if (targetMotion.status !== "closed" || (targetMotion.outcome || "").toLowerCase() !== "passed") {
+    return res.status(403).json({ message: "Only previously passed motions can be overturned." });
+  }
+  if ((targetMotion.votingMode || "named") !== "named") {
+    return res.status(403).json({ message: "Only motions with named voting can be overturned." });
+  }
+  const voteChoice = getNamedVote(targetMotion, username);
+  if (voteChoice !== "up") {
+    return res.status(403).json({ message: "Only members who voted in favor can move to overturn this decision." });
+  }
+  if (targetMotion.overturnedByMotionId) {
+    return res.status(403).json({ message: "This decision has already been overturned." });
+  }
+
+  const normalizedType =
+    motionType === "procedure" || motionType === "procedural" ? "procedure" : "standard";
+  const overturnMotion = {
+    proposer: username,
+    title: title.trim(),
+    description: (description || "").trim(),
+    text: (description || title || "").trim() || title.trim(),
+    type: normalizedType,
+    requiredPercentage: normalizedType === "procedure" ? 66 : 50,
+    votes: { up: 0, down: 0 },
+    voterMap: {},
+    votingMode: (votingMode || targetMotion.votingMode || "named").toLowerCase() === "anonymous" ? "anonymous" : "named",
+    anonymousVotedUsers: [],
+    status: "open",
+    outcome: "pending",
+    isOverturn: true,
+    targetMotionId: targetMotion._id,
+    overturnedByMotionId: null,
+  };
+
+  meeting.motions.push(overturnMotion);
+  const newMotion = meeting.motions[meeting.motions.length - 1];
+
+  meeting.messages.push({
+    author: "System",
+    text: `${username} raised a motion to overturn the decision on "${targetMotion.title || targetMotion.text || "Untitled motion"}".`,
+    motionId: newMotion._id,
+  });
+
+  await meeting.save();
+  res.json({ meeting, motion: newMotion });
+});
 
 app.post("/meetings/:code/messages", async (req, res) => {
   const { username, text, motionId } = req.body || {};
@@ -397,6 +467,21 @@ async function closeMotionRoute(req, res) {
     text: summary,
     motionId: motion._id,
   });
+
+  if (motion.isOverturn && passed) {
+    const targetMotion = mtg.motions.id(motion.targetMotionId);
+    if (targetMotion) {
+      targetMotion.outcome = "overturned";
+      targetMotion.overturnedByMotionId = motion._id;
+      const targetTitle = targetMotion.title || targetMotion.text || "Untitled motion";
+      const overturnMsg = `The decision on "${targetTitle}" was OVERTURNED by motion "${displayTitle}".`;
+      mtg.messages.push({
+        author: "System",
+        text: overturnMsg,
+        motionId: motion._id,
+      });
+    }
+  }
 
   await mtg.save();
   res.json({ message: "Motion voting closed", meeting: mtg, motion });
@@ -471,6 +556,18 @@ app.get("/meetings/:code/export", async (req, res) => {
       motion.status === "closed"
         ? (motion.outcome || "pending").toUpperCase()
         : "PENDING";
+    const overturnedByMotion =
+      motion.overturnedByMotionId &&
+      (mtg.motions || []).find(
+        (m) => String(m._id) === String(motion.overturnedByMotionId)
+      );
+    const targetMotion =
+      motion.isOverturn &&
+      motion.targetMotionId &&
+      (mtg.motions || []).find(
+        (m) => String(m._id) === String(motion.targetMotionId)
+      );
+    const outcomeLabel = overturnedByMotion ? `${outcome} — OVERTURNED` : outcome;
     const decisionSummary = (motion.decisionSummary || "").trim();
 
     const replies = motion.replies || [];
@@ -496,10 +593,18 @@ app.get("/meetings/:code/export", async (req, res) => {
     const lines = [
       `${idx + 1}. ${motionTitle}`,
       `   • Type: ${motion.type || "standard"} (requires ${required}%)`,
-      `   • Outcome: ${outcome} — 👍 ${up} / 👎 ${down}`,
+      `   • Outcome: ${outcomeLabel} — 👍 ${up} / 👎 ${down}`,
     ];
     if (decisionSummary) {
       lines.push(`   • Decision summary: ${decisionSummary}`);
+    }
+    if (overturnedByMotion) {
+      const overTitle = overturnedByMotion.title || overturnedByMotion.text || "Overturn motion";
+      lines.push(`   • Overturned by: ${overTitle}`);
+    }
+    if (targetMotion) {
+      const targetTitle = targetMotion.title || targetMotion.text || "Previous motion";
+      lines.push(`   • Overturning: ${targetTitle}`);
     }
     lines.push("   • Pros:");
     if (prosReplies.length === 0) {

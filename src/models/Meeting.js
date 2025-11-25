@@ -52,12 +52,15 @@ const MotionSchema = new mongoose.Schema(
       default: [],
     },
     status: { type: String, enum: ["open", "closed"], default: "open" },
-    outcome: { type: String, enum: ["pending", "passed", "failed"], default: "pending" },
+    outcome: { type: String, enum: ["pending", "passed", "failed", "overturned"], default: "pending" },
     closedAt: { type: Date, default: null },
     replies: { type: [ReplySchema], default: [] },
     decisionSummary: { type: String, default: "" },
     prosSummary: { type: String, default: "" },
     consSummary: { type: String, default: "" },
+    isOverturn: { type: Boolean, default: false },
+    targetMotionId: { type: mongoose.Schema.Types.ObjectId, default: null },
+    overturnedByMotionId: { type: mongoose.Schema.Types.ObjectId, default: null },
   },
   { _id: true, timestamps: true }
 );

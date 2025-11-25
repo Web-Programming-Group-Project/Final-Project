@@ -165,3 +165,29 @@ export async function downloadMeetingMinutes({ code }) {
   }
   return res.blob();
 }
+
+export async function createOverturnMotion({
+  meetingId,
+  username,
+  targetMotionId,
+  title,
+  description,
+  motionType = "procedure",
+  votingMode = "named",
+}) {
+  const res = await fetch(`${API_BASE}/meetings/${meetingId}/motions/overturn`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      username,
+      targetMotionId,
+      title,
+      description,
+      motionType,
+      votingMode,
+    }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.message || "Failed to raise overturn motion");
+  return data;
+}
