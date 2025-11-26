@@ -70,7 +70,18 @@ export async function joinMeeting({ code, username, displayName }) {
   return data;
 }
 
-export async function raiseMotion({ code, username, title, description, text, type = "standard", votingMode = "named" }) {
+export async function raiseMotion({
+  code,
+  username,
+  title,
+  description,
+  text,
+  type = "standard",
+  votingMode = "named",
+  subType = "none",
+  parentMotionId,
+  postponeUntil,
+}) {
   const res = await fetch(`${API_BASE}/meetings/${code}/motions`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -81,6 +92,9 @@ export async function raiseMotion({ code, username, title, description, text, ty
       motionText: text ?? title ?? "",
       motionType: type,
       votingMode,
+      subType,
+      parentMotionId,
+      postponeUntil,
     }),
   });
   const data = await res.json().catch(() => ({}));

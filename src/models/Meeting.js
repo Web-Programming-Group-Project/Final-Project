@@ -36,6 +36,16 @@ const MotionSchema = new mongoose.Schema(
       enum: ["standard", "procedure"],
       default: "standard",
     },
+    motionCategory: {
+      type: String,
+      enum: ["standard", "procedural", "submotion", "special"],
+      default: "standard",
+    },
+    specialMotionType: {
+      type: String,
+      enum: ["adjourn", "closeDebate", "pointOfOrder"],
+      default: null,
+    },
     requiredPercentage: { type: Number, default: 50 },
     votes:    {
       up:   { type: Number, default: 0 },
@@ -51,8 +61,14 @@ const MotionSchema = new mongoose.Schema(
       type: [String],
       default: [],
     },
+    allowDiscussion: { type: Boolean, default: true },
+    chairDecision: { type: String, enum: ['sustained', 'denied'], default: null },
     status: { type: String, enum: ["open", "closed"], default: "open" },
-    outcome: { type: String, enum: ["pending", "passed", "failed", "overturned"], default: "pending" },
+    outcome: {
+      type: String,
+      enum: ["pending", "passed", "failed", "overturned", "postponed"],
+      default: "pending",
+    },
     closedAt: { type: Date, default: null },
     replies: { type: [ReplySchema], default: [] },
     decisionSummary: { type: String, default: "" },
@@ -63,6 +79,33 @@ const MotionSchema = new mongoose.Schema(
     overturnedByMotionId: { type: mongoose.Schema.Types.ObjectId, default: null },
     overturned: { type: Boolean, default: false },
     originalOutcome: { type: String, default: "" },
+    subType: {
+      type: String,
+      enum: ["none", "overturn", "revise", "postpone"],
+      default: "none",
+    },
+    subMotionType: {
+      type: String,
+      enum: ["none", "overturn", "revise", "postpone"],
+      default: "none",
+    },
+    parentMotionId: { type: mongoose.Schema.Types.ObjectId, default: null },
+    postponeUntil: { type: String, default: "" },
+    wasRevised: { type: Boolean, default: false },
+    revisedByMotionId: { type: mongoose.Schema.Types.ObjectId, default: null },
+    revisionHistory: {
+      type: [
+        {
+          at: { type: Date, default: Date.now },
+          byMotionId: { type: mongoose.Schema.Types.ObjectId, required: true },
+          oldTitle: { type: String },
+          oldDescription: { type: String },
+          newTitle: { type: String },
+          newDescription: { type: String },
+        },
+      ],
+      default: [],
+    },
   },
   { _id: true, timestamps: true }
 );

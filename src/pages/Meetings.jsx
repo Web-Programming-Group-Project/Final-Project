@@ -23,6 +23,15 @@ import {
   createOverturnMotion as apiCreateOverturnMotion,
 } from "../api";
 
+function resolveSubMotionType(motion) {
+  if (!motion) return "none";
+  const raw =
+    motion.subMotionType ||
+    motion.subType ||
+    (motion.isOverturn ? "overturn" : "none");
+  return (raw || "none").toLowerCase();
+}
+
 function sanitizeTitleForFilename(value) {
   return (value || "")
     .toLowerCase()
@@ -84,7 +93,9 @@ export default function Meetings() {
   const [meetingSummaryError, setMeetingSummaryError] = useState("");
   const [previousDetailsExpanded, setPreviousDetailsExpanded] = useState({});
   const [downloadingMinutes, setDownloadingMinutes] = useState(false);
-  const [overturnTargetMotionId, setOverturnTargetMotionId] = useState(null);
+  const [subMotionMode, setSubMotionMode] = useState("none"); // none | overturn | revise | postpone
+  const [subMotionParentId, setSubMotionParentId] = useState(null);
+  const [postponeUntilInput, setPostponeUntilInput] = useState("");
   const chatEndRef = useRef(null);
 
   const code = meeting?.code || initialCode;
@@ -133,14 +144,15 @@ export default function Meetings() {
   }, [meeting?.messages, meeting?.motions]);
 
   useEffect(() => {
-    if (!overturnTargetMotionId) return;
+    if (!subMotionParentId) return;
     const exists = (meeting?.motions || []).some(
-      (motion) => String(motion._id) === String(overturnTargetMotionId)
+      (motion) => String(motion._id) === String(subMotionParentId)
     );
     if (!exists) {
-      setOverturnTargetMotionId(null);
+      setSubMotionParentId(null);
+      setSubMotionMode("none");
     }
-  }, [meeting?.motions, overturnTargetMotionId]);
+  }, [meeting?.motions, subMotionParentId]);
 
   const generalMessages = useMemo(() => {
     return (meeting?.messages || [])
@@ -164,6 +176,34 @@ export default function Meetings() {
     return map;
   }, [meeting?.motions]);
 
+  const childMotionsByParent = useMemo(() => {
+    const map = new Map();
+    (meeting?.motions || []).forEach((motion) => {
+      const subType = resolveSubMotionType(motion);
+      if (subType === "none") return;
+      const parentId = motion.parentMotionId || (subType === "overturn" ? motion.targetMotionId : null);
+      if (!parentId) return;
+      const key = String(parentId);
+      if (!map.has(key)) map.set(key, []);
+      map.get(key).push(motion);
+    });
+    return map;
+  }, [meeting?.motions]);
+
+  const pendingRevisionParents = useMemo(() => {
+    const set = new Set();
+    (meeting?.motions || []).forEach((motion) => {
+      const subType = resolveSubMotionType(motion);
+      if (subType !== "revise") return;
+      const isPending =
+        motion.status === "open" || (motion.outcome || "pending").toLowerCase() === "pending";
+      if (!isPending) return;
+      const parentId = motion.parentMotionId || motion.targetMotionId;
+      if (parentId) set.add(String(parentId));
+    });
+    return set;
+  }, [meeting?.motions]);
+
   const meetingSummaryText = (meeting?.meetingSummary || "").trim();
   const meetingSummaryButtonLabel = meetingSummaryText ? "Edit Meeting Summary" : "Add Meeting Summary";
 
@@ -181,14 +221,44 @@ export default function Meetings() {
       );
   }, [meeting?.motions]);
 
-  const overturnTargetMotion = overturnTargetMotionId
-    ? motionsById.get(String(overturnTargetMotionId))
+  const previousDecisionIds = useMemo(() => {
+    return new Set(previousDecisions.map((motion) => String(motion._id)));
+  }, [previousDecisions]);
+
+  const mainDecisions = useMemo(() => {
+    return previousDecisions.filter((motion) => {
+      const subType = resolveSubMotionType(motion);
+      return subType === "none" || !motion.parentMotionId;
+    });
+  }, [previousDecisions]);
+
+  const orphanSubDecisions = useMemo(() => {
+    return previousDecisions.filter((motion) => {
+      const subType = resolveSubMotionType(motion);
+      if (subType === "none") return false;
+      const parentId = motion.parentMotionId || motion.targetMotionId;
+      if (!parentId) return true;
+      return !previousDecisionIds.has(String(parentId));
+    });
+  }, [previousDecisions, previousDecisionIds]);
+
+  const subMotionParent = subMotionParentId
+    ? motionsById.get(String(subMotionParentId))
     : null;
-  const isOverturnMode = Boolean(overturnTargetMotionId);
+  const isOverturnMode = subMotionMode === "overturn";
+  const isReviseMode = subMotionMode === "revise";
+  const isPostponeMode = subMotionMode === "postpone";
+  const isSubMotionMode = subMotionMode !== "none";
   const closeVotingModalOpen = Boolean(closeVotingModalMotion);
   const closingMotion = closeVotingModalMotion;
-  const raiseDialogTitle = isOverturnMode ? "Overturn Decision" : "Raise Motion";
-  const raiseSubmitLabel = isOverturnMode ? "Submit Overturn Motion" : "Submit Motion";
+  const raiseDialogTitle = isOverturnMode
+    ? "Overturn Decision"
+    : isReviseMode
+    ? "Revise Motion"
+    : isPostponeMode
+    ? "Postpone Decision"
+    : "Raise Motion";
+  const raiseSubmitLabel = isSubMotionMode ? "Submit Procedural Motion" : "Submit Motion";
 
   const myRole =
     meeting?.participants?.find((p) => p.username === username)?.role || "member";
@@ -198,7 +268,7 @@ export default function Meetings() {
   const canSend = Boolean(username);
   function userCanOverturnMotion(motion) {
     if (!motion || !username) return false;
-    if (motion.isOverturn) return false;
+    if (resolveSubMotionType(motion) === "overturn") return false;
     if (motion.overturned || motion.overturnedByMotionId) return false;
     if ((motion.votingMode || "named") !== "named") return false;
     if (motion.status !== "closed") return false;
@@ -236,36 +306,77 @@ export default function Meetings() {
     setMotionError("");
     setMotionType("standard");
     setMotionVotingMode("named");
-    setOverturnTargetMotionId(null);
+    setSubMotionMode("none");
+    setSubMotionParentId(null);
+    setPostponeUntilInput("");
     setRaiseModalOpen(true);
   }
 
   function openOverturnMotionModal(motion) {
     if (!motion) return;
     const baseTitle = motion.title || motion.text || "Untitled motion";
-    setOverturnTargetMotionId(String(motion._id));
+    setSubMotionMode("overturn");
+    setSubMotionParentId(String(motion._id));
     setMotionTitleInput(`Overturn: ${baseTitle}`);
     setMotionDescriptionInput(`Motion to overturn the previous decision on "${baseTitle}".`);
     setMotionError("");
     setMotionType("procedure");
     setMotionVotingMode("named");
+    setPostponeUntilInput("");
+    setRaiseModalOpen(true);
+  }
+
+  function openReviseMotionModal(motion) {
+    if (!motion) return;
+    const baseTitle = motion.title || motion.text || "Untitled motion";
+    setSubMotionMode("revise");
+    setSubMotionParentId(String(motion._id));
+    setMotionTitleInput(baseTitle);
+    setMotionDescriptionInput(motion.description || "");
+    setMotionError("");
+    setMotionType("procedure");
+    setMotionVotingMode("named");
+    setPostponeUntilInput("");
+    setRaiseModalOpen(true);
+  }
+
+  function openPostponeMotionModal(motion) {
+    if (!motion) return;
+    const baseTitle = motion.title || motion.text || "Untitled motion";
+    setSubMotionMode("postpone");
+    setSubMotionParentId(String(motion._id));
+    setMotionTitleInput(`Postpone: ${baseTitle}`);
+    setMotionDescriptionInput(`Motion to postpone decision on "${baseTitle}".`);
+    setMotionError("");
+    setMotionType("procedure");
+    setMotionVotingMode("named");
+    setPostponeUntilInput("");
     setRaiseModalOpen(true);
   }
 
   function closeRaiseMotionModal() {
     if (raisingMotion) return;
     setRaiseModalOpen(false);
-    setOverturnTargetMotionId(null);
+    setSubMotionMode("none");
+    setSubMotionParentId(null);
+    setPostponeUntilInput("");
   }
 
   async function submitMotion(e) {
     e.preventDefault();
     const isOverturn = isOverturnMode;
+    const isRevise = isReviseMode;
+    const isPostpone = isPostponeMode;
+    const parentMotion = subMotionParent;
     if (!meeting || !code) {
       setMotionError("Meeting not loaded.");
       return;
     }
-    if (!isOverturn && !canRaiseMotion) return;
+    if (!isOverturn && !canRaiseMotion && !isRevise && !isPostpone) return;
+    if ((isRevise || isPostpone) && !canManageMotions) {
+      setMotionError("Only the chair/owner can raise this procedural motion.");
+      return;
+    }
     const title = motionTitleInput.trim();
     const description = motionDescriptionInput.trim();
     if (!title) {
@@ -276,8 +387,12 @@ export default function Meetings() {
       setMotionError("You must be logged in to raise a motion.");
       return;
     }
-    if (isOverturn && !overturnTargetMotion) {
+    if (isOverturn && !parentMotion) {
       setMotionError("Target motion not found.");
+      return;
+    }
+    if ((isRevise || isPostpone) && !parentMotion) {
+      setMotionError("Parent motion not found.");
       return;
     }
     setRaisingMotion(true);
@@ -287,7 +402,7 @@ export default function Meetings() {
         const response = await apiCreateOverturnMotion({
           meetingId: meeting._id,
           username,
-          targetMotionId: overturnTargetMotion._id,
+          targetMotionId: parentMotion._id,
           title,
           description,
           motionType,
@@ -304,8 +419,11 @@ export default function Meetings() {
           username,
           title,
           description,
-          type: motionType,
+          type: isSubMotionMode ? "procedure" : motionType,
           votingMode: motionVotingMode,
+          subType: isRevise ? "revise" : isPostpone ? "postpone" : "none",
+          parentMotionId: parentMotion ? parentMotion._id : undefined,
+          postponeUntil: isPostpone ? postponeUntilInput.trim() : undefined,
         });
         setMeeting((prev) => {
           if (!prev) return prev;
@@ -317,7 +435,9 @@ export default function Meetings() {
       setMotionDescriptionInput("");
       setMotionType("standard");
       setMotionVotingMode("named");
-      setOverturnTargetMotionId(null);
+      setSubMotionMode("none");
+      setSubMotionParentId(null);
+      setPostponeUntilInput("");
       setRaiseModalOpen(false);
     } catch (err) {
       console.error("Failed to raise motion", err);
@@ -669,7 +789,7 @@ export default function Meetings() {
                   </div>
                 ) : (
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                    {previousDecisions.map((motion) => {
+                    {mainDecisions.map((motion) => {
                       const motionId = String(motion._id);
                       const summaryText = (motion.decisionSummary || "").trim();
                       const hasSummary = Boolean(summaryText);
@@ -679,27 +799,42 @@ export default function Meetings() {
                       const expanded = Boolean(previousDetailsExpanded[motionId]);
                       const up = motion.votes?.up ?? 0;
                       const down = motion.votes?.down ?? 0;
+                      const motionSubType = resolveSubMotionType(motion);
                       const overturnedByMotion = motion.overturnedByMotionId
                         ? motionsById.get(String(motion.overturnedByMotionId))
                         : null;
+                      const isPostponed = (motion.outcome || "").toLowerCase() === "postponed";
                       const isOverturned =
                         Boolean(
                           motion.overturned ||
                             (motion.outcome || "").toLowerCase() === "overturned" ||
                             overturnedByMotion
-                        ) && !motion.isOverturn;
+                        ) && motionSubType !== "overturn";
                       let outcomeLabel = (
                         motion.originalOutcome || motion.outcome || "pending"
                       ).toUpperCase();
                       if (isOverturned) {
                         outcomeLabel = `${outcomeLabel} (OVERTURNED)`;
                       } else if (
-                        motion.isOverturn &&
+                        motionSubType === "overturn" &&
                         motion.targetMotionId &&
                         outcomeLabel !== "PENDING"
                       ) {
                         outcomeLabel = `${outcomeLabel} (Overturn)`;
+                      } else if (isPostponed) {
+                        outcomeLabel = "POSTPONED";
                       }
+                      const hasRevisions =
+                        Array.isArray(motion.revisionHistory) && motion.revisionHistory.length > 0;
+                      const lastRevisionEntry = hasRevisions
+                        ? motion.revisionHistory[motion.revisionHistory.length - 1]
+                        : null;
+                      const childEntries = (childMotionsByParent.get(motionId) || [])
+                        .filter((child) => previousDecisionIds.has(String(child._id)))
+                        .sort(
+                          (a, b) =>
+                            new Date(a.createdAt || 0) - new Date(b.createdAt || 0)
+                        );
                       const canOverturnFromList = userCanOverturnMotion(motion);
                       return (
                         <div
@@ -724,12 +859,24 @@ export default function Meetings() {
                           <div style={{ color: "#5a637d", fontSize: "0.85rem" }}>
                             Final tally: 👍 {up} / 👎 {down}
                           </div>
-                          {isOverturned && !motion.isOverturn && (
+                          {isPostponed && (
+                            <div style={{ marginTop: 4, color: "#b00020", fontSize: "0.85rem" }}>
+                              Decision postponed
+                              {motion.postponeUntil ? ` (until "${motion.postponeUntil}")` : ""}.
+                            </div>
+                          )}
+                          {isOverturned && motionSubType !== "overturn" && (
                             <div style={{ marginTop: 4, color: "#b00020", fontSize: "0.85rem" }}>
                               Overturned by:{" "}
                               {overturnedByMotion?.title ||
                                 overturnedByMotion?.text ||
                                 "Overturn motion"}
+                            </div>
+                          )}
+                          {hasRevisions && lastRevisionEntry && (
+                            <div style={{ marginTop: 4, color: "#2f3b61", fontSize: "0.85rem" }}>
+                              Revised via procedural motion on{" "}
+                              {new Date(lastRevisionEntry.at || motion.updatedAt || Date.now()).toLocaleString()}.
                             </div>
                           )}
                           {hasSummary && (
@@ -793,9 +940,102 @@ export default function Meetings() {
                               </div>
                             </div>
                           )}
+                          {childEntries.length > 0 && (
+                            <div
+                              style={{
+                                marginTop: 8,
+                                paddingLeft: 12,
+                                borderLeft: "2px solid #d1daeb",
+                                display: "flex",
+                                flexDirection: "column",
+                                gap: 6,
+                              }}
+                            >
+                              {childEntries.map((child) => {
+                                const childId = String(child._id);
+                                const childSubType = resolveSubMotionType(child);
+                                const childOutcome = (child.outcome || "pending").toUpperCase();
+                                const childUp = child.votes?.up ?? 0;
+                                const childDown = child.votes?.down ?? 0;
+                                const childLabel =
+                                  childSubType === "revise"
+                                    ? "Revision motion"
+                                    : childSubType === "postpone"
+                                    ? "Postpone motion"
+                                    : "Overturn motion";
+                                return (
+                                  <div key={`child-${childId}`} style={{ fontSize: "0.85rem", color: "#3b4252" }}>
+                                    <div style={{ fontWeight: 600 }}>
+                                      {childLabel}: {childOutcome} (👍 {childUp} / 👎 {childDown})
+                                    </div>
+                                    {childSubType === "revise" && (
+                                      <div>
+                                        Updated title: {child.title}.{" "}
+                                        {child.description
+                                          ? `New description: ${child.description}`
+                                          : "No description provided."}
+                                      </div>
+                                    )}
+                                    {childSubType === "postpone" && (
+                                      <div>
+                                        Voting {childOutcome === "PASSED" ? "postponed" : "not postponed"}.
+                                        {child.postponeUntil ? ` Until: "${child.postponeUntil}".` : ""}
+                                      </div>
+                                    )}
+                                    {childSubType === "overturn" && (
+                                      <div>
+                                        Targeted:{" "}
+                                        {motionsById.get(String(child.targetMotionId))?.title ||
+                                          "Prior motion"}
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
                         </div>
                       );
                     })}
+                    {orphanSubDecisions.length > 0 && (
+                      <div
+                        style={{
+                          border: "1px solid #f0d9ff",
+                          borderRadius: 6,
+                          padding: 8,
+                          background: "#faf5ff",
+                          fontSize: "0.85rem",
+                          color: "#5b3c78",
+                        }}
+                      >
+                        <div style={{ fontWeight: 600, marginBottom: 6 }}>
+                          Procedural motions awaiting parent decision
+                        </div>
+                        {orphanSubDecisions.map((child) => {
+                          const childSubType = resolveSubMotionType(child);
+                          const childOutcome = (child.outcome || "pending").toUpperCase();
+                          const parentId = child.parentMotionId || child.targetMotionId;
+                          const childUp = child.votes?.up ?? 0;
+                          const childDown = child.votes?.down ?? 0;
+                          return (
+                            <div key={`orphan-${child._id}`} style={{ marginBottom: 6 }}>
+                              <div style={{ fontWeight: 600 }}>
+                                {childSubType === "revise"
+                                  ? "Revision motion"
+                                  : childSubType === "postpone"
+                                  ? "Postpone motion"
+                                  : "Overturn motion"}{" "}
+                                for motion ID {parentId ? String(parentId) : "Unknown"} — {childOutcome}
+                              </div>
+                              <div>Votes: 👍 {childUp} / 👎 {childDown}</div>
+                              {childSubType === "postpone" && child.postponeUntil && (
+                                <div>Until: "{child.postponeUntil}"</div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -836,6 +1076,7 @@ export default function Meetings() {
                     const selected = selectedMotionId === motionId;
                     const isClosed = motion.status === "closed";
                     const normalizedOutcome = (motion.outcome || "pending").toLowerCase();
+                    const motionSubType = resolveSubMotionType(motion);
                     let resultLabel =
                       motion.outcome && normalizedOutcome !== "pending"
                         ? motion.outcome.toUpperCase()
@@ -859,9 +1100,11 @@ export default function Meetings() {
                     const replyError = replyErrorMap[motionId];
                     const replySubmitting = Boolean(replySubmittingMap[motionId]);
                     const showVoterList = Boolean(voterListExpanded[motionId]);
+                    const motionIsPostponed = (motion.outcome || "").toLowerCase() === "postponed";
                     const voteButtonsDisabled =
                       !username ||
                       isClosed ||
+                      motionIsPostponed ||
                       (votingMode === "anonymous" && userVotedAnonymous);
                     const overturnedByMotion = motion.overturnedByMotionId
                       ? motionsById.get(String(motion.overturnedByMotionId))
@@ -871,21 +1114,36 @@ export default function Meetings() {
                         motion.overturned ||
                           (motion.outcome || "").toLowerCase() === "overturned" ||
                           overturnedByMotion
-                      ) && !motion.isOverturn;
+                      ) && motionSubType !== "overturn";
                     const canOverturnThisMotion = userCanOverturnMotion(motion);
-                    const overturnTargetMotionDetails =
-                      motion.isOverturn && motion.targetMotionId
-                        ? motionsById.get(String(motion.targetMotionId))
-                        : null;
+                    const parentReferenceId =
+                      motion.parentMotionId || (motionSubType === "overturn" ? motion.targetMotionId : null);
+                    const parentMotionDetails = parentReferenceId
+                      ? motionsById.get(String(parentReferenceId))
+                      : null;
                     if (isMotionOverturned) {
                       resultLabel = "OVERTURNED";
                       const prevOutcomeLabel = (motion.originalOutcome || "passed").toUpperCase();
                       resultSuffix = ` (was ${prevOutcomeLabel})`;
                     } else if (motion.overturnedByMotionId) {
                       resultSuffix = " — OVERTURNED";
-                    } else if (motion.isOverturn && normalizedOutcome !== "pending") {
+                    } else if (motionSubType === "overturn" && normalizedOutcome !== "pending") {
                     	resultSuffix = " (Overturn)";
                     }
+                    const hasRevisions =
+                      Array.isArray(motion.revisionHistory) && motion.revisionHistory.length > 0;
+                    const lastRevisionEntry = hasRevisions
+                      ? motion.revisionHistory[motion.revisionHistory.length - 1]
+                      : null;
+                    const pendingRevision = pendingRevisionParents.has(motionId);
+                    const canShowSubActions =
+                      canManageMotions &&
+                      motionSubType === "none" &&
+                      normalizedOutcome === "pending" &&
+                      motion.status === "open" &&
+                      !isMotionOverturned &&
+                      !motionIsPostponed &&
+                      !pendingRevision;
                     return (
                       <div
                         key={`motion-${motionId}-${i}`}
@@ -923,6 +1181,54 @@ export default function Meetings() {
                         <div style={{ fontSize: "0.85rem", color: "#555", marginBottom: 6 }}>
                           {typeLabel} · Voting mode: {votingModeLabel}
                         </div>
+                        {pendingRevision && motionSubType === "none" && (
+                          <div style={{ marginBottom: 6, fontSize: "0.85rem", color: "#8c3700" }}>
+                            Revision proposed via procedural motion (vote pending).
+                          </div>
+                        )}
+                        {lastRevisionEntry && motionSubType === "none" && (
+                          <div style={{ marginBottom: 6, fontSize: "0.85rem", color: "#174ea6" }}>
+                            Note: text revised via procedural motion on{" "}
+                            {new Date(lastRevisionEntry.at || motion.updatedAt || Date.now()).toLocaleString()}.
+                          </div>
+                        )}
+                        {motionSubType === "revise" && parentMotionDetails && (
+                          <div style={{ marginBottom: 6, fontSize: "0.85rem", color: "#444" }}>
+                            Revises: {parentMotionDetails.title || parentMotionDetails.text || "Untitled motion"}
+                          </div>
+                        )}
+                        {motionSubType === "postpone" && parentMotionDetails && (
+                          <div style={{ marginBottom: 6, fontSize: "0.85rem", color: "#444" }}>
+                            Postpone decision on:{" "}
+                            {parentMotionDetails.title || parentMotionDetails.text || "Untitled motion"}
+                          </div>
+                        )}
+                        {motionSubType === "postpone" && (
+                          <div style={{ marginBottom: 6, fontSize: "0.85rem", color: "#444" }}>
+                            Proposed postponement:{" "}
+                            {motion.postponeUntil ? `"${motion.postponeUntil}"` : "Not specified"}
+                          </div>
+                        )}
+                        {motionSubType === "revise" && (
+                          <div style={{ marginBottom: 6, fontSize: "0.85rem", color: "#444" }}>
+                            Proposed new title/description shown above.
+                          </div>
+                        )}
+                        {motionSubType === "revise" && normalizedOutcome === "failed" && (
+                          <div style={{ marginBottom: 6, fontSize: "0.85rem", color: "#8c1d18" }}>
+                            Revision failed; original text kept.
+                          </div>
+                        )}
+                        {motionSubType === "revise" && normalizedOutcome === "passed" && (
+                          <div style={{ marginBottom: 6, fontSize: "0.85rem", color: "#0f5132" }}>
+                            Revision approved; parent motion updated.
+                          </div>
+                        )}
+                        {motionSubType === "postpone" && normalizedOutcome === "passed" && (
+                          <div style={{ marginBottom: 6, fontSize: "0.85rem", color: "#5d4037" }}>
+                            Parent motion voting postponed.
+                          </div>
+                        )}
                         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                           <button
                             type="button"
@@ -956,7 +1262,7 @@ export default function Meetings() {
                           >
                             👎 {motion.votes?.down ?? 0}
                           </button>
-                          {canManageMotions && !isClosed && (
+                          {canManageMotions && !isClosed && !motionIsPostponed && (
                             <button
                               type="button"
                               onClick={(e) => {
@@ -991,6 +1297,52 @@ export default function Meetings() {
                             Final tally: 👍 {motion.votes?.up ?? 0} / 👎 {motion.votes?.down ?? 0}
                           </div>
                         )}
+                        {motionIsPostponed && (
+                          <div style={{ marginTop: 6, fontSize: "0.9rem", color: "#b00020" }}>
+                            Decision postponed
+                            {motion.postponeUntil ? ` (until "${motion.postponeUntil}")` : ""}.
+                          </div>
+                        )}
+                        {canShowSubActions && (
+                          <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openReviseMotionModal(motion);
+                              }}
+                              style={{
+                                borderRadius: 6,
+                                border: "1px solid #0d47a1",
+                                background: "#fff",
+                                color: "#0d47a1",
+                                padding: "4px 10px",
+                                fontWeight: 600,
+                                cursor: "pointer",
+                              }}
+                            >
+                              Revise motion
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openPostponeMotionModal(motion);
+                              }}
+                              style={{
+                                borderRadius: 6,
+                                border: "1px solid #5d4037",
+                                background: "#fff",
+                                color: "#5d4037",
+                                padding: "4px 10px",
+                                fontWeight: 600,
+                                cursor: "pointer",
+                              }}
+                            >
+                              Postpone decision
+                            </button>
+                          </div>
+                        )}
                         {canOverturnThisMotion && (
                           <div style={{ marginTop: 8 }}>
                             <button
@@ -1021,9 +1373,24 @@ export default function Meetings() {
                               "Overturn motion"}
                           </div>
                         )}
-                        {motion.isOverturn && overturnTargetMotionDetails && (
+                        {motionSubType === "overturn" && parentMotionDetails && (
                           <div style={{ marginTop: 8, fontSize: "0.85rem", color: "#333" }}>
-                            Targeting: {overturnTargetMotionDetails.title || overturnTargetMotionDetails.text || "Untitled motion"}
+                            Targeting: {parentMotionDetails.title || parentMotionDetails.text || "Untitled motion"}
+                          </div>
+                        )}
+                        {motionSubType === "revise" && parentMotionDetails && (
+                          <div style={{ marginTop: 8, fontSize: "0.85rem", color: "#333" }}>
+                            Revises: {parentMotionDetails.title || parentMotionDetails.text || "Untitled motion"}
+                          </div>
+                        )}
+                        {motionSubType === "postpone" && parentMotionDetails && (
+                          <div style={{ marginTop: 8, fontSize: "0.85rem", color: "#333" }}>
+                            Postpones: {parentMotionDetails.title || parentMotionDetails.text || "Untitled motion"}
+                          </div>
+                        )}
+                        {hasRevisions && motionSubType === "none" && (
+                          <div style={{ marginTop: 8, fontSize: "0.85rem", color: "#333" }}>
+                            Note: Motion text revised via procedural motion.
                           </div>
                         )}
                         {isClosed && votingMode === "named" && (
@@ -1397,8 +1764,42 @@ export default function Meetings() {
                 }}
               >
                 This motion will overturn the previous decision on{" "}
-                <strong>{overturnTargetMotion?.title || overturnTargetMotion?.text || "Untitled motion"}</strong>. Only members
+                <strong>{subMotionParent?.title || subMotionParent?.text || "Untitled motion"}</strong>. Only members
                 who voted in favor can initiate this action.
+              </div>
+            )}
+            {isReviseMode && (
+              <div
+                style={{
+                  background: "#e8f0fe",
+                  border: "1px solid #8ab4f8",
+                  borderRadius: 6,
+                  padding: 10,
+                  marginBottom: 16,
+                  color: "#174ea6",
+                  fontSize: "0.9rem",
+                }}
+              >
+                Propose revised wording for{" "}
+                <strong>{subMotionParent?.title || subMotionParent?.text || "Untitled motion"}</strong>. The
+                updated title/description below will replace the original if this passes.
+              </div>
+            )}
+            {isPostponeMode && (
+              <div
+                style={{
+                  background: "#ede7f6",
+                  border: "1px solid #c5a4ff",
+                  borderRadius: 6,
+                  padding: 10,
+                  marginBottom: 16,
+                  color: "#4a148c",
+                  fontSize: "0.9rem",
+                }}
+              >
+                Postpone the decision on{" "}
+                <strong>{subMotionParent?.title || subMotionParent?.text || "Untitled motion"}</strong>. Provide an
+                optional note for when/why the decision is delayed.
               </div>
             )}
             <FormGroup label="Motion title" labelFor="motion-title-input">
@@ -1429,7 +1830,7 @@ export default function Meetings() {
                 onChange={(e) => setMotionType(e.target.value)}
                 selectedValue={motionType}
                 inline
-                disabled={isOverturnMode}
+                disabled={isSubMotionMode}
               >
                 <Radio value="standard" label="Standard (50%)" />
                 <Radio value="procedure" label="Procedural (66%)" />
@@ -1450,6 +1851,18 @@ export default function Meetings() {
             </FormGroup>
             {motionError && (
               <p style={{ color: "red", marginTop: 8 }}>{motionError}</p>
+            )}
+            {isPostponeMode && (
+              <FormGroup label="Postpone until (optional)" labelFor="postpone-until-input">
+                <input
+                  id="postpone-until-input"
+                  className="bp4-input"
+                  type="text"
+                  value={postponeUntilInput}
+                  onChange={(e) => setPostponeUntilInput(e.target.value)}
+                  placeholder='e.g., "Next meeting", "April 10"'
+                />
+              </FormGroup>
             )}
           </div>
           <div className={Classes.DIALOG_FOOTER}>

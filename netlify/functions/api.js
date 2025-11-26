@@ -92,6 +92,14 @@ function sanitizeForFilename(value) {
   return safe || "meeting";
 }
 
+function getMotionSubTypeValue(motion) {
+  const raw =
+    motion?.subMotionType ||
+    motion?.subType ||
+    (motion?.isOverturn ? "overturn" : "none");
+  return (raw || "none").toLowerCase();
+}
+
 async function getMeetingByCode(code) {
   return Meeting.findOne({ code: (code || "").toUpperCase() });
 }
@@ -257,10 +265,18 @@ app.post("/meetings/:code/motions", async (req, res) => {
   const rawTitle = (req.body?.motionTitle ?? req.body?.title ?? "").trim();
   const rawDescription = (req.body?.motionDescription ?? req.body?.description ?? "").trim();
   const rawLegacyText = (req.body?.motionText ?? req.body?.text ?? "").trim();
-  const motionTypeInput = req.body?.motionType ?? req.body?.type;
+  const motionTypeInput = (req.body?.motionType ?? req.body?.type ?? "").toLowerCase();
   const votingModeInput = (req.body?.votingMode || "").toLowerCase();
+  const subTypeInput = (req.body?.subType || req.body?.motionSubType || "none").toLowerCase();
+  const parentMotionId = req.body?.parentMotionId || req.body?.targetMotionId || null;
+  const postponeUntil = (req.body?.postponeUntil || "").trim();
 
-  const motionType = motionTypeInput === "procedural" || motionTypeInput === "procedure" ? "procedure" : "standard";
+  const allowedSubTypes = ["none", "overturn", "revise", "postpone"];
+  const normalizedSubType = allowedSubTypes.includes(subTypeInput) ? subTypeInput : "none";
+  const isSubMotion = normalizedSubType !== "none";
+  const motionTypeIsProcedural =
+    isSubMotion || motionTypeInput === "procedural" || motionTypeInput === "procedure";
+  const motionType = motionTypeIsProcedural ? "procedure" : "standard";
   const requiredPercentage = motionType === "procedure" ? 66 : 50;
   const title = rawTitle || rawLegacyText;
   const votingMode = votingModeInput === "anonymous" ? "anonymous" : "named";
@@ -270,7 +286,24 @@ app.post("/meetings/:code/motions", async (req, res) => {
   const mtg = await getMeetingByCode(req.params.code);
   if (!mtg) return res.status(404).json({ message: "Meeting not found" });
 
-  mtg.motions.push({
+  let parentMotion = null;
+  if (["revise", "postpone"].includes(normalizedSubType)) {
+    if (!parentMotionId) {
+      return res
+        .status(400)
+        .json({ message: "parentMotionId is required for revise/postpone sub-motions." });
+    }
+    parentMotion = mtg.motions.id(parentMotionId);
+    if (!parentMotion) {
+      return res.status(404).json({ message: "Parent motion not found" });
+    }
+    if ((parentMotion.outcome || "").toLowerCase() === "postponed") {
+      return res.status(400).json({ message: "Cannot revise or postpone an already postponed motion." });
+    }
+  }
+
+  const isOverturn = normalizedSubType === "overturn";
+  const motionPayload = {
     proposer: username,
     title,
     description: rawDescription || undefined,
@@ -282,7 +315,14 @@ app.post("/meetings/:code/motions", async (req, res) => {
     votes: { up: 0, down: 0 },
     votingMode,
     anonymousVotedUsers: [],
-  });
+    isOverturn,
+    subType: normalizedSubType,
+    subMotionType: normalizedSubType,
+    parentMotionId: parentMotion ? parentMotion._id : null,
+    postponeUntil: normalizedSubType === "postpone" ? postponeUntil : "",
+  };
+
+  mtg.motions.push(motionPayload);
 
   const motion = mtg.motions[mtg.motions.length - 1];
 
@@ -303,6 +343,9 @@ app.post("/meetings/:code/motions/:motionId/vote", async (req, res) => {
   if (!motion) return res.status(404).json({ message: "Motion not found" });
   if (motion.status === "closed") {
     return res.status(400).json({ message: "Voting is closed for this motion." });
+  }
+  if ((motion.outcome || "").toLowerCase() === "postponed") {
+    return res.status(400).json({ message: "Voting is postponed for this motion." });
   }
 
   const votingMode = motion.votingMode || "named";
@@ -390,6 +433,10 @@ app.post("/meetings/:meetingId/motions/overturn", async (req, res) => {
     isOverturn: true,
     targetMotionId: targetMotion._id,
     overturnedByMotionId: null,
+    subType: "overturn",
+    subMotionType: "overturn",
+    parentMotionId: targetMotion._id,
+    postponeUntil: "",
   };
 
   meeting.motions.push(overturnMotion);
@@ -466,6 +513,65 @@ async function closeMotionRoute(req, res) {
     text: summary,
     motionId: motion._id,
   });
+
+  const normalizedSubType = (motion.subType || motion.subMotionType || (motion.isOverturn ? "overturn" : "none")).toLowerCase();
+  motion.subType = normalizedSubType;
+  motion.subMotionType = normalizedSubType;
+
+  if (normalizedSubType === "revise" && passed) {
+    const parentMotion =
+      motion.parentMotionId
+        ? mtg.motions.id(motion.parentMotionId)
+        : motion.targetMotionId
+        ? mtg.motions.id(motion.targetMotionId)
+        : null;
+    if (parentMotion) {
+      const oldTitle = parentMotion.title || parentMotion.text || "Untitled motion";
+      const oldDescription = parentMotion.description || parentMotion.text || "";
+      parentMotion.revisionHistory = parentMotion.revisionHistory || [];
+      parentMotion.revisionHistory.push({
+        at: new Date(),
+        byMotionId: motion._id,
+        oldTitle,
+        oldDescription,
+        newTitle: motion.title,
+        newDescription: motion.description,
+      });
+      parentMotion.title = motion.title;
+      parentMotion.description = motion.description;
+      parentMotion.text = motion.text;
+      parentMotion.updatedAt = new Date();
+      parentMotion.wasRevised = true;
+      parentMotion.revisedByMotionId = motion._id;
+      const reviseMsg = `Motion "${oldTitle}" was REVISED by "${displayTitle}" (${up} in favor, ${down} against; required ${required}%).`;
+      mtg.messages.push({
+        author: "System",
+        text: reviseMsg,
+        motionId: motion._id,
+      });
+    }
+  } else if (normalizedSubType === "postpone" && passed) {
+    const parentMotion =
+      motion.parentMotionId
+        ? mtg.motions.id(motion.parentMotionId)
+        : motion.targetMotionId
+        ? mtg.motions.id(motion.targetMotionId)
+        : null;
+    if (parentMotion) {
+      parentMotion.outcome = "postponed";
+      parentMotion.status = "closed";
+      parentMotion.postponeUntil = motion.postponeUntil || "";
+      parentMotion.closedAt = new Date();
+      parentMotion.updatedAt = new Date();
+      const reasonText = motion.postponeUntil ? ` Reason: "${motion.postponeUntil}".` : "";
+      const postponeMsg = `Decision on motion "${parentMotion.title || parentMotion.text || "Untitled motion"}" was POSTPONED (${up} in favor, ${down} against; required ${required}%).${reasonText}`;
+      mtg.messages.push({
+        author: "System",
+        text: postponeMsg,
+        motionId: motion._id,
+      });
+    }
+  }
 
   if (motion.isOverturn && passed) {
     const targetMotion = mtg.motions.id(motion.targetMotionId);
@@ -554,47 +660,118 @@ app.get("/meetings/:code/export", async (req, res) => {
   const safeName = sanitizeForFilename(mtg.title || mtg.code || "meeting");
   const minutesFilename = `${safeName}-minutes.txt`;
 
-  const motionLines = (mtg.motions || []).map((motion, idx) => {
+  const motions = mtg.motions || [];
+  const motionMap = new Map(motions.map((motion) => [String(motion._id), motion]));
+  const childrenByParent = new Map();
+  const topLevelMotions = [];
+
+  motions.forEach((motion) => {
+    const subType = getMotionSubTypeValue(motion);
+    const parentId = motion.parentMotionId || (subType === "overturn" ? motion.targetMotionId : null);
+    if (subType !== "none" && parentId) {
+      const key = String(parentId);
+      if (!childrenByParent.has(key)) childrenByParent.set(key, []);
+      childrenByParent.get(key).push(motion);
+    } else {
+      topLevelMotions.push(motion);
+    }
+  });
+
+  const orphanChildren = [];
+  childrenByParent.forEach((children, parentId) => {
+    const parentExists = topLevelMotions.some((motion) => String(motion._id) === parentId);
+    if (!parentExists) {
+      orphanChildren.push(...children);
+    }
+  });
+
+  function formatMainMotion(motion, idx) {
     const motionTitle = motion.title || motion.text || "Untitled motion";
     const required = motion.requiredPercentage || (motion.type === "procedure" ? 66 : 50);
     const up = motion.votes?.up || 0;
     const down = motion.votes?.down || 0;
-    const outcomeRaw =
+    const motionSubType = getMotionSubTypeValue(motion);
+    const isPostponed = (motion.outcome || "").toLowerCase() === "postponed";
+    const overturnedByMotion =
+      motion.overturnedByMotionId &&
+      motionMap.get(String(motion.overturnedByMotionId));
+    let outcomeDescription =
       motion.status === "closed"
         ? (motion.outcome || "pending").toUpperCase()
         : "PENDING";
-    const overturnedByMotion =
-      motion.overturnedByMotionId &&
-      (mtg.motions || []).find(
-        (m) => String(m._id) === String(motion.overturnedByMotionId)
-      );
-    const targetMotion =
-      motion.isOverturn &&
-      motion.targetMotionId &&
-      (mtg.motions || []).find(
-        (m) => String(m._id) === String(motion.targetMotionId)
-      );
-    const outcomeLabel = outcomeRaw;
-    let outcomeDescription = outcomeRaw;
-    if (
+    if (isPostponed) {
+      outcomeDescription = `POSTPONED${
+        motion.postponeUntil ? ` (until "${motion.postponeUntil}")` : ""
+      }`;
+    } else if (
       motion.overturned ||
       (motion.outcome || "").toLowerCase() === "overturned" ||
       overturnedByMotion
     ) {
-      const previousOutcome = (motion.originalOutcome || outcomeRaw).toUpperCase();
+      const previousOutcome = (motion.originalOutcome || outcomeDescription).toUpperCase();
       const overTitle = overturnedByMotion?.title || overturnedByMotion?.text || "Overturn motion";
       outcomeDescription = `${previousOutcome} (later OVERTURNED by "${overTitle}")`;
-    } else if (motion.isOverturn && targetMotion) {
-      const targetTitle = targetMotion.title || targetMotion.text || "Previous motion";
-      outcomeDescription = `${outcomeLabel}. Targeted "${targetTitle}"`;
     }
     const decisionSummary = (motion.decisionSummary || "").trim();
+    const revisionHistory = motion.revisionHistory || [];
+    const lastRevision =
+      revisionHistory.length > 0 ? revisionHistory[revisionHistory.length - 1] : null;
+
+    const lines = [
+      `${idx + 1}. ${motionTitle} — ${outcomeDescription}. Final tally: ${up} in favor, ${down} against.`,
+      `   • Type: ${motion.type || "standard"} (requires ${required}%)`,
+    ];
+    if (decisionSummary) {
+      lines.push(`   • Decision summary: ${decisionSummary}`);
+    }
+    if (motion.wasRevised && lastRevision) {
+      lines.push(
+        `   • Revised via procedural motion on ${new Date(
+          lastRevision.at || Date.now()
+        ).toLocaleString()}.`
+      );
+    }
+    if ((motion.outcome || "").toLowerCase() === "overturned" && overturnedByMotion) {
+      const overTitle = overturnedByMotion.title || overturnedByMotion.text || "Overturn motion";
+      lines.push(`   • Overturned by: ${overTitle}`);
+    }
+
+    const childEntries = (childrenByParent.get(String(motion._id)) || []).sort(
+      (a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0)
+    );
+    if (childEntries.length > 0) {
+      lines.push("   • Related procedural motions:");
+      childEntries.forEach((child) => {
+        const childSubType = getMotionSubTypeValue(child);
+        const childOutcome = (child.outcome || "pending").toUpperCase();
+        const childUp = child.votes?.up || 0;
+        const childDown = child.votes?.down || 0;
+        let detail = "";
+        if (childSubType === "revise") {
+          detail = `Proposed new title: ${child.title}.`;
+          if (child.description) {
+            detail += ` Description: ${child.description}`;
+          }
+        } else if (childSubType === "postpone") {
+          detail = `Voting ${childOutcome === "PASSED" ? "postponed" : "not postponed"}.`;
+          if (child.postponeUntil) {
+            detail += ` Until: "${child.postponeUntil}".`;
+          }
+        } else if (childSubType === "overturn") {
+          const targetTitle =
+            motionMap.get(String(child.targetMotionId))?.title || "Prior motion";
+          detail = `Targeted "${targetTitle}".`;
+        }
+        lines.push(
+          `     - ${childSubType === "revise" ? "Revision motion" : childSubType === "postpone" ? "Postpone motion" : "Overturn motion"} (${childOutcome}) — ${childUp} in favor, ${childDown} against. ${detail}`
+        );
+      });
+    }
 
     const replies = motion.replies || [];
     const prosReplies = replies.filter((reply) => (reply.stance || "").toLowerCase() === "pro");
     const consReplies = replies.filter((reply) => (reply.stance || "").toLowerCase() === "con");
-
-    const repliesLog = (motion.replies || []).map(
+    const repliesLog = replies.map(
       (reply) =>
         `  - [${new Date(reply.createdAt || motion.updatedAt || Date.now()).toLocaleString()} — ${
           reply.authorDisplayName || reply.authorUsername || "Unknown"
@@ -610,20 +787,6 @@ app.get("/meetings/:code/export", async (req, res) => {
       );
     const discussionBlock = [...repliesLog, ...discussionMessages];
 
-    const lines = [
-      `${idx + 1}. ${motionTitle} — ${outcomeDescription}. Final tally: ${up} in favor, ${down} against.`,
-      `   • Type: ${motion.type || "standard"} (requires ${required}%)`,
-    ];
-    if (decisionSummary) {
-      lines.push(`   • Decision summary: ${decisionSummary}`);
-    }
-    if (motion.isOverturn && targetMotion) {
-      const targetTitle = targetMotion.title || targetMotion.text || "Previous motion";
-      lines.push(`   • Overturning: ${targetTitle}`);
-    } else if (motion.outcome === "overturned" && overturnedByMotion) {
-      const overTitle = overturnedByMotion.title || overturnedByMotion.text || "Overturn motion";
-      lines.push(`   • Overturned by: ${overTitle}`);
-    }
     lines.push("   • Pros:");
     if (prosReplies.length === 0) {
       lines.push("     - None recorded.");
@@ -647,8 +810,32 @@ app.get("/meetings/:code/export", async (req, res) => {
       discussionBlock.forEach((entry) => lines.push(entry));
     }
     return lines.join("\n");
-  });
+  }
 
+  const motionLines = topLevelMotions.map((motion, idx) =>
+    formatMainMotion(motion, idx)
+  );
+
+  if (orphanChildren.length > 0) {
+    motionLines.push("Procedural motions awaiting parent decisions:");
+    orphanChildren.forEach((child) => {
+      const childSubType = getMotionSubTypeValue(child);
+      const label =
+        childSubType === "revise"
+          ? "Revision motion"
+          : childSubType === "postpone"
+          ? "Postpone motion"
+          : "Overturn motion";
+      const childOutcome = (child.outcome || "pending").toUpperCase();
+      const childUp = child.votes?.up || 0;
+      const childDown = child.votes?.down || 0;
+      motionLines.push(
+        `- ${label} for motion ID ${
+          child.parentMotionId || child.targetMotionId || "unknown"
+        } — ${childOutcome} (👍 ${childUp} / 👎 ${childDown}).`
+      );
+    });
+  }
   const exportText = [
     `Meeting: ${mtg.title}`,
     `Code: ${mtg.code}`,
