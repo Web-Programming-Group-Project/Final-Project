@@ -81,6 +81,8 @@ export async function raiseMotion({
   subType = "none",
   parentMotionId,
   postponeUntil,
+  motionCategory,
+  specialMotionType,
 }) {
   const res = await fetch(`${API_BASE}/meetings/${code}/motions`, {
     method: "POST",
@@ -95,6 +97,8 @@ export async function raiseMotion({
       subType,
       parentMotionId,
       postponeUntil,
+      motionCategory,
+      specialMotionType,
     }),
   });
   const data = await res.json().catch(() => ({}));
@@ -204,4 +208,15 @@ export async function createOverturnMotion({
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.message || "Failed to raise overturn motion");
   return data;
+}
+
+export async function recordChairDecision({ meetingId, motionId, username, decision }) {
+  const res = await fetch(`${API_BASE}/meetings/${meetingId}/motions/${motionId}/chair-decision`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, decision }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.message || "Failed to record chair decision");
+  return data.meeting;
 }

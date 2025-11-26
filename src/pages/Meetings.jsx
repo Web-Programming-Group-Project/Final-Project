@@ -21,6 +21,7 @@ import {
   updateMeetingSummary as apiUpdateMeetingSummary,
   downloadMeetingMinutes as apiDownloadMeetingMinutes,
   createOverturnMotion as apiCreateOverturnMotion,
+  recordChairDecision as apiRecordChairDecision,
 } from "../api";
 
 function resolveSubMotionType(motion) {
@@ -54,6 +55,28 @@ function getVoteChoice(voterMap, username) {
   return null;
 }
 
+const SPECIAL_MOTION_RULES = {
+  adjourn: {
+    label: "Adjourn meeting",
+    summary: "Not debatable · requires simple majority (50%) vote.",
+    needsVote: true,
+    requiredPercentage: 50,
+    allowDiscussion: false,
+  },
+  closeDebate: {
+    label: "Close debate (Previous Question)",
+    summary: "Not debatable · requires 2/3 vote (66%).",
+    needsVote: true,
+    requiredPercentage: 66,
+    allowDiscussion: false,
+  },
+};
+const SPECIAL_MOTION_TYPES = [
+  { value: "adjourn", label: SPECIAL_MOTION_RULES.adjourn.label },
+  { value: "closeDebate", label: SPECIAL_MOTION_RULES.closeDebate.label },
+];
+const DEFAULT_SPECIAL_MOTION_TYPE = SPECIAL_MOTION_TYPES[0].value;
+
 export default function Meetings() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -70,6 +93,7 @@ export default function Meetings() {
   const [roleUpdating, setRoleUpdating] = useState(null);
   const [roleError, setRoleError] = useState("");
   const [motionType, setMotionType] = useState("standard");
+  const [specialMotionType, setSpecialMotionType] = useState(DEFAULT_SPECIAL_MOTION_TYPE);
   const [motionVotingMode, setMotionVotingMode] = useState("named");
   const [raiseModalOpen, setRaiseModalOpen] = useState(false);
   const [motionTitleInput, setMotionTitleInput] = useState("");
@@ -81,6 +105,8 @@ export default function Meetings() {
   const [replyStanceMap, setReplyStanceMap] = useState({});
   const [replyErrorMap, setReplyErrorMap] = useState({});
   const [replySubmittingMap, setReplySubmittingMap] = useState({});
+  const [chairDecisionSubmittingMap, setChairDecisionSubmittingMap] = useState({});
+  const [chairDecisionErrorMap, setChairDecisionErrorMap] = useState({});
   const [closeVotingModalMotion, setCloseVotingModalMotion] = useState(null);
   const [closeDecisionSummary, setCloseDecisionSummary] = useState("");
   const [closeProsSummary, setCloseProsSummary] = useState("");
@@ -100,6 +126,9 @@ export default function Meetings() {
 
   const code = meeting?.code || initialCode;
   const username = user?.username || user?.email;
+  const meetingAdjournedMessage = "Meeting has been adjourned. No further changes are allowed.";
+  const isAdjourned = Boolean((meeting?.adjourned ?? false) || meeting?.open === false);
+  const adjournedAt = meeting?.adjournedAt ? new Date(meeting.adjournedAt) : null;
 
   useEffect(() => {
     if (!code) {
@@ -258,14 +287,43 @@ export default function Meetings() {
     : isPostponeMode
     ? "Postpone Decision"
     : "Raise Motion";
-  const raiseSubmitLabel = isSubMotionMode ? "Submit Procedural Motion" : "Submit Motion";
+  const raiseSubmitLabel = isSubMotionMode
+    ? "Submit Procedural Motion"
+    : motionType === "special"
+    ? "Submit Special Motion"
+    : "Submit Motion";
 
   const myRole =
     meeting?.participants?.find((p) => p.username === username)?.role || "member";
   const canManageMotions = ["owner", "chair"].includes(myRole);
-  const canRaiseMotion = ["owner", "chair"].includes(myRole);
+  const canRaiseMotionBase = canManageMotions;
+  const canRaiseMotion = canRaiseMotionBase && !isAdjourned;
   const showRaiseButton = myRole !== "observer";
-  const canSend = Boolean(username);
+  const canSend = Boolean(username) && !isAdjourned;
+  const chatInputPlaceholder = isAdjourned
+    ? "Meeting adjourned — chat is closed."
+    : "Type a message...";
+  const raiseButtonDisabled = !canRaiseMotion;
+  const raiseButtonTitle = !canRaiseMotionBase
+    ? "Only the chair or owner can raise motions."
+    : isAdjourned
+    ? meetingAdjournedMessage
+    : undefined;
+  function isAdjournedErrorMessage(message) {
+    if (!message) return false;
+    return message.toLowerCase().includes("adjourn");
+  }
+
+  async function refreshMeetingState() {
+    if (!code) return;
+    try {
+      const latest = await getMeeting({ code });
+      setMeeting(latest);
+    } catch (err) {
+      console.error("Failed to refresh meeting", err);
+    }
+  }
+
   function userCanOverturnMotion(motion) {
     if (!motion || !username) return false;
     if (resolveSubMotionType(motion) === "overturn") return false;
@@ -280,6 +338,10 @@ export default function Meetings() {
 
   async function sendMessage(e) {
     e.preventDefault();
+    if (isAdjourned) {
+      window.alert(meetingAdjournedMessage);
+      return;
+    }
     const text = messageText.trim();
     if (!text || !meeting || !code) return;
     if (!username) {
@@ -295,16 +357,27 @@ export default function Meetings() {
       setMessageText("");
     } catch (err) {
       console.error("Failed to send message", err);
-      window.alert(err.message || "Failed to send message");
+      const errorMessage = err.message || "Failed to send message";
+      if (isAdjournedErrorMessage(errorMessage)) {
+        window.alert(errorMessage);
+        refreshMeetingState();
+      } else {
+        window.alert(errorMessage);
+      }
     }
   }
 
   function openRaiseMotionModal() {
-    if (!canRaiseMotion) return;
+    if (!canRaiseMotionBase) return;
+    if (isAdjourned) {
+      window.alert(meetingAdjournedMessage);
+      return;
+    }
     setMotionTitleInput("");
     setMotionDescriptionInput("");
     setMotionError("");
     setMotionType("standard");
+    setSpecialMotionType(DEFAULT_SPECIAL_MOTION_TYPE);
     setMotionVotingMode("named");
     setSubMotionMode("none");
     setSubMotionParentId(null);
@@ -314,6 +387,10 @@ export default function Meetings() {
 
   function openOverturnMotionModal(motion) {
     if (!motion) return;
+    if (isAdjourned) {
+      window.alert(meetingAdjournedMessage);
+      return;
+    }
     const baseTitle = motion.title || motion.text || "Untitled motion";
     setSubMotionMode("overturn");
     setSubMotionParentId(String(motion._id));
@@ -328,6 +405,10 @@ export default function Meetings() {
 
   function openReviseMotionModal(motion) {
     if (!motion) return;
+    if (isAdjourned) {
+      window.alert(meetingAdjournedMessage);
+      return;
+    }
     const baseTitle = motion.title || motion.text || "Untitled motion";
     setSubMotionMode("revise");
     setSubMotionParentId(String(motion._id));
@@ -342,6 +423,10 @@ export default function Meetings() {
 
   function openPostponeMotionModal(motion) {
     if (!motion) return;
+    if (isAdjourned) {
+      window.alert(meetingAdjournedMessage);
+      return;
+    }
     const baseTitle = motion.title || motion.text || "Untitled motion";
     setSubMotionMode("postpone");
     setSubMotionParentId(String(motion._id));
@@ -354,12 +439,35 @@ export default function Meetings() {
     setRaiseModalOpen(true);
   }
 
+  function handleMotionTypeChange(nextType) {
+    setMotionType(nextType);
+    if (nextType === "special") {
+      setMotionVotingMode("named");
+      setMotionTitleInput((prev) =>
+        prev && prev.trim()
+          ? prev
+          : SPECIAL_MOTION_RULES[specialMotionType]?.label || "Special motion"
+      );
+    }
+  }
+
+  function handleSpecialMotionTypeChange(nextType) {
+    setSpecialMotionType(nextType);
+    setMotionTitleInput((prev) =>
+      prev && prev.trim()
+        ? prev
+        : SPECIAL_MOTION_RULES[nextType]?.label || "Special motion"
+    );
+  }
+
   function closeRaiseMotionModal() {
     if (raisingMotion) return;
     setRaiseModalOpen(false);
     setSubMotionMode("none");
     setSubMotionParentId(null);
     setPostponeUntilInput("");
+    setMotionType("standard");
+    setSpecialMotionType(DEFAULT_SPECIAL_MOTION_TYPE);
   }
 
   async function submitMotion(e) {
@@ -367,9 +475,15 @@ export default function Meetings() {
     const isOverturn = isOverturnMode;
     const isRevise = isReviseMode;
     const isPostpone = isPostponeMode;
+    const isSpecialMotion = !isSubMotionMode && motionType === "special";
+    const specialRule = isSpecialMotion ? SPECIAL_MOTION_RULES[specialMotionType] : null;
     const parentMotion = subMotionParent;
     if (!meeting || !code) {
       setMotionError("Meeting not loaded.");
+      return;
+    }
+    if (isAdjourned) {
+      setMotionError(meetingAdjournedMessage);
       return;
     }
     if (!isOverturn && !canRaiseMotion && !isRevise && !isPostpone) return;
@@ -377,7 +491,14 @@ export default function Meetings() {
       setMotionError("Only the chair/owner can raise this procedural motion.");
       return;
     }
-    const title = motionTitleInput.trim();
+    if (isSpecialMotion && !specialRule) {
+      setMotionError("Select a valid special motion type.");
+      return;
+    }
+    let title = motionTitleInput.trim();
+    if (isSpecialMotion && !title && specialRule) {
+      title = specialRule.label;
+    }
     const description = motionDescriptionInput.trim();
     if (!title) {
       setMotionError("Motion title is required.");
@@ -419,11 +540,13 @@ export default function Meetings() {
           username,
           title,
           description,
-          type: isSubMotionMode ? "procedure" : motionType,
-          votingMode: motionVotingMode,
+          type: isSubMotionMode ? "procedure" : isSpecialMotion ? "procedure" : motionType,
+          votingMode: isSpecialMotion ? "named" : motionVotingMode,
           subType: isRevise ? "revise" : isPostpone ? "postpone" : "none",
           parentMotionId: parentMotion ? parentMotion._id : undefined,
           postponeUntil: isPostpone ? postponeUntilInput.trim() : undefined,
+          motionCategory: isSpecialMotion ? "special" : undefined,
+          specialMotionType: isSpecialMotion ? specialMotionType : undefined,
         });
         setMeeting((prev) => {
           if (!prev) return prev;
@@ -434,6 +557,7 @@ export default function Meetings() {
       setMotionTitleInput("");
       setMotionDescriptionInput("");
       setMotionType("standard");
+      setSpecialMotionType(DEFAULT_SPECIAL_MOTION_TYPE);
       setMotionVotingMode("named");
       setSubMotionMode("none");
       setSubMotionParentId(null);
@@ -441,7 +565,11 @@ export default function Meetings() {
       setRaiseModalOpen(false);
     } catch (err) {
       console.error("Failed to raise motion", err);
-      setMotionError(err.message || "Failed to raise motion");
+      const errorMessage = err.message || "Failed to raise motion";
+      setMotionError(errorMessage);
+      if (isAdjournedErrorMessage(errorMessage)) {
+        refreshMeetingState();
+      }
     } finally {
       setRaisingMotion(false);
     }
@@ -449,6 +577,10 @@ export default function Meetings() {
 
   async function toggleVote(motionId, vote) {
     if (!meeting || !code) return;
+    if (isAdjourned) {
+      window.alert(meetingAdjournedMessage);
+      return;
+    }
     if (!username) {
       window.alert("You must be logged in to vote.");
       return;
@@ -464,7 +596,13 @@ export default function Meetings() {
       });
     } catch (err) {
       console.error("Failed to vote", err);
-      window.alert(err.message || "Failed to submit vote");
+      const errorMessage = err.message || "Failed to submit vote";
+      if (isAdjournedErrorMessage(errorMessage)) {
+        window.alert(errorMessage);
+        refreshMeetingState();
+      } else {
+        window.alert(errorMessage);
+      }
     }
   }
 
@@ -490,6 +628,10 @@ export default function Meetings() {
 
   function openCloseVotingModalForMotion(motion) {
     if (!canManageMotions) return;
+    if (isAdjourned) {
+      window.alert(meetingAdjournedMessage);
+      return;
+    }
     setCloseVotingModalMotion(motion);
     setCloseDecisionSummary(motion?.decisionSummary || "");
     setCloseProsSummary(motion?.prosSummary || "");
@@ -508,6 +650,11 @@ export default function Meetings() {
   async function submitCloseVoting(e) {
     e.preventDefault();
     if (!meeting || !code || !username || !closeVotingModalMotion) return;
+    if (isAdjourned) {
+      window.alert(meetingAdjournedMessage);
+      dismissCloseVotingModal(true);
+      return;
+    }
     const decision = closeDecisionSummary.trim();
     if (!decision) {
       setCloseVotingError("Decision summary is required.");
@@ -599,9 +746,70 @@ export default function Meetings() {
     }));
   }
 
+  async function handleChairDecision(motionId, decision) {
+    if (!meeting?._id) {
+      setChairDecisionErrorMap((prev) => ({
+        ...prev,
+        [motionId]: "Meeting not loaded.",
+      }));
+      return;
+    }
+    if (isAdjourned) {
+      setChairDecisionErrorMap((prev) => ({
+        ...prev,
+        [motionId]: meetingAdjournedMessage,
+      }));
+      return;
+    }
+    if (!username) {
+      setChairDecisionErrorMap((prev) => ({
+        ...prev,
+        [motionId]: "You must be logged in to record a ruling.",
+      }));
+      return;
+    }
+    setChairDecisionSubmittingMap((prev) => ({ ...prev, [motionId]: true }));
+    setChairDecisionErrorMap((prev) => ({ ...prev, [motionId]: "" }));
+    try {
+      const updatedMeeting = await apiRecordChairDecision({
+        meetingId: meeting._id,
+        motionId,
+        username,
+        decision,
+      });
+      setMeeting(updatedMeeting);
+    } catch (err) {
+      const errorMessage = err.message || "Failed to record chair decision";
+      setChairDecisionErrorMap((prev) => ({
+        ...prev,
+        [motionId]: errorMessage,
+      }));
+      if (isAdjournedErrorMessage(errorMessage)) {
+        refreshMeetingState();
+      }
+    } finally {
+      setChairDecisionSubmittingMap((prev) => ({ ...prev, [motionId]: false }));
+    }
+  }
+
   async function submitReply(motionId) {
     if (!meeting?._id) {
       setReplyErrorMap((prev) => ({ ...prev, [motionId]: "Meeting not loaded." }));
+      return;
+    }
+    if (isAdjourned) {
+      setReplyErrorMap((prev) => ({
+        ...prev,
+        [motionId]: meetingAdjournedMessage,
+      }));
+      return;
+    }
+    const replyMotion = motionsById.get(String(motionId));
+    if (replyMotion && replyMotion.allowDiscussion === false) {
+      setReplyErrorMap((prev) => ({
+        ...prev,
+        [motionId]: "Discussion is disabled for this motion.",
+      }));
       return;
     }
     if (!username) {
@@ -640,7 +848,11 @@ export default function Meetings() {
       setReplyTextMap((prev) => ({ ...prev, [motionId]: "" }));
       setReplyStanceMap((prev) => ({ ...prev, [motionId]: "neutral" }));
     } catch (err) {
-      setReplyErrorMap((prev) => ({ ...prev, [motionId]: err.message || "Failed to add reply" }));
+      const errorMessage = err.message || "Failed to add reply";
+      setReplyErrorMap((prev) => ({ ...prev, [motionId]: errorMessage }));
+      if (isAdjournedErrorMessage(errorMessage)) {
+        refreshMeetingState();
+      }
     } finally {
       setReplySubmittingMap((prev) => ({ ...prev, [motionId]: false }));
     }
@@ -693,6 +905,22 @@ export default function Meetings() {
               <div style={{ fontSize: "0.95rem", color: "#555", marginBottom: 12 }}>
                 Your role in this meeting: <strong>{myRole}</strong>
               </div>
+              {isAdjourned && (
+                <div
+                  style={{
+                    background: "#fff4e5",
+                    border: "1px solid #ffb74d",
+                    borderRadius: 8,
+                    padding: 12,
+                    marginBottom: 16,
+                    color: "#6c3a00",
+                    fontWeight: 600,
+                  }}
+                >
+                  This meeting has been adjourned{adjournedAt ? ` as of ${adjournedAt.toLocaleString()}` : ""}.
+                  You can review motions and messages, but no further changes are allowed.
+                </div>
+              )}
               <div style={{ background: "#eef5ff", borderRadius: 10, padding: 16, marginBottom: 16, border: "1px solid #c7ddff" }}>
                 <div style={{ fontWeight: 600, marginBottom: 8 }}>Overall Meeting Summary</div>
                 <div style={{ fontSize: "0.95rem", color: "#333", whiteSpace: "pre-line" }}>
@@ -781,7 +1009,7 @@ export default function Meetings() {
                 }}
               >
                 <div style={{ fontWeight: 600, fontSize: "1.05rem", marginBottom: 8 }}>
-                  Previous Decisions
+                  Previous Decisions {isAdjourned ? "(Meeting adjourned)" : ""}
                 </div>
                 {previousDecisions.length === 0 ? (
                   <div style={{ color: "#666", fontSize: "0.85rem" }}>
@@ -810,9 +1038,27 @@ export default function Meetings() {
                             (motion.outcome || "").toLowerCase() === "overturned" ||
                             overturnedByMotion
                         ) && motionSubType !== "overturn";
-                      let outcomeLabel = (
+                      const motionCategory = (motion.motionCategory || "").toLowerCase();
+                      const isSpecialDecision = motionCategory === "special";
+                      const specialRule =
+                        isSpecialDecision
+                          ? SPECIAL_MOTION_RULES[motion.specialMotionType] || null
+                          : null;
+                      const isLegacyPointOfOrder =
+                        isSpecialDecision && motion.specialMotionType === "pointOfOrder";
+                      const chairDecides = Boolean(specialRule?.chairDecides || isLegacyPointOfOrder);
+                      const specialSummary =
+                        specialRule?.summary ||
+                        (isLegacyPointOfOrder ? "Special motion · Chair decides · No vote." : null);
+                      const showVoteTotals =
+                        !chairDecides && (!specialRule || specialRule.needsVote !== false);
+                      let baseOutcomeLabel = (
                         motion.originalOutcome || motion.outcome || "pending"
                       ).toUpperCase();
+                      if (isPostponed) {
+                        baseOutcomeLabel = "POSTPONED";
+                      }
+                      let outcomeLabel = baseOutcomeLabel;
                       if (isOverturned) {
                         outcomeLabel = `${outcomeLabel} (OVERTURNED)`;
                       } else if (
@@ -821,8 +1067,12 @@ export default function Meetings() {
                         outcomeLabel !== "PENDING"
                       ) {
                         outcomeLabel = `${outcomeLabel} (Overturn)`;
-                      } else if (isPostponed) {
-                        outcomeLabel = "POSTPONED";
+                      }
+                      let displayedOutcome = outcomeLabel;
+                      if (chairDecides) {
+                        displayedOutcome = motion.chairDecision
+                          ? `Chair ruled: ${motion.chairDecision === "sustained" ? "Sustained" : "Denied"}`
+                          : "Chair ruling pending";
                       }
                       const hasRevisions =
                         Array.isArray(motion.revisionHistory) && motion.revisionHistory.length > 0;
@@ -853,12 +1103,35 @@ export default function Meetings() {
                               {motion.title || motion.text || "Untitled motion"}
                             </div>
                             <span style={{ color: "#5a637d" }}>
-                              Outcome: {outcomeLabel}
+                              Outcome: {displayedOutcome}
                             </span>
                           </div>
-                          <div style={{ color: "#5a637d", fontSize: "0.85rem" }}>
-                            Final tally: 👍 {up} / 👎 {down}
-                          </div>
+                          {isSpecialDecision && (
+                            <>
+                              <div style={{ color: "#5a637d", fontSize: "0.8rem", marginTop: 2 }}>
+                                {`Special motion${specialRule?.label ? ` — ${specialRule.label}` : ""}`}
+                              </div>
+                              {specialSummary && (
+                                <div style={{ color: "#5a637d", fontSize: "0.8rem" }}>
+                                  {specialSummary}
+                                </div>
+                              )}
+                            </>
+                          )}
+                          {showVoteTotals ? (
+                            <div style={{ color: "#5a637d", fontSize: "0.85rem" }}>
+                              Final tally: 👍 {up} / 👎 {down}
+                            </div>
+                          ) : (
+                            <div style={{ color: "#5a637d", fontSize: "0.85rem" }}>
+                              Chair ruling:{" "}
+                              {motion.chairDecision
+                                ? motion.chairDecision === "sustained"
+                                  ? "Sustained"
+                                  : "Denied"
+                                : "Pending"}
+                            </div>
+                          )}
                           {isPostponed && (
                             <div style={{ marginTop: 4, color: "#b00020", fontSize: "0.85rem" }}>
                               Decision postponed
@@ -1089,10 +1362,21 @@ export default function Meetings() {
                       votingMode === "anonymous" && username
                         ? anonymousVoters.includes(username)
                         : false;
-                    const typeLabel =
-                      motion.type === "procedure"
-                        ? `Procedural motion · requires ${motion.requiredPercentage || 66}%`
-                        : `Standard motion · requires ${motion.requiredPercentage || 50}%`;
+                    const motionCategoryValue = (motion.motionCategory || "").toLowerCase();
+                    const isSpecialMotionCard = motionCategoryValue === "special";
+                    const specialRule = isSpecialMotionCard
+                      ? SPECIAL_MOTION_RULES[motion.specialMotionType] || null
+                      : null;
+                    const isLegacyPointOfOrder =
+                      isSpecialMotionCard && motion.specialMotionType === "pointOfOrder";
+                    const specialSummary =
+                      specialRule?.summary ||
+                      (isLegacyPointOfOrder ? "Special motion · Chair decides · No vote." : null);
+                    const typeDescription = specialSummary
+                      ? specialSummary
+                      : motion.type === "procedure"
+                      ? `Procedural motion · requires ${motion.requiredPercentage || 66}%`
+                      : `Standard motion · requires ${motion.requiredPercentage || 50}%`;
                     const votingModeLabel = votingMode === "anonymous" ? "Anonymous" : "Named";
                     const displayTitle = motion.title || motion.text || "Untitled motion";
                     const replyText = replyTextMap[motionId] || "";
@@ -1101,10 +1385,16 @@ export default function Meetings() {
                     const replySubmitting = Boolean(replySubmittingMap[motionId]);
                     const showVoterList = Boolean(voterListExpanded[motionId]);
                     const motionIsPostponed = (motion.outcome || "").toLowerCase() === "postponed";
+                    const chairDecidesMotion = Boolean(specialRule?.chairDecides || isLegacyPointOfOrder);
+                    const disallowVoting =
+                      chairDecidesMotion || (specialRule && specialRule.needsVote === false);
+                    const showVoteControls = !disallowVoting;
                     const voteButtonsDisabled =
                       !username ||
                       isClosed ||
                       motionIsPostponed ||
+                      isAdjourned ||
+                      !showVoteControls ||
                       (votingMode === "anonymous" && userVotedAnonymous);
                     const overturnedByMotion = motion.overturnedByMotionId
                       ? motionsById.get(String(motion.overturnedByMotionId))
@@ -1115,7 +1405,7 @@ export default function Meetings() {
                           (motion.outcome || "").toLowerCase() === "overturned" ||
                           overturnedByMotion
                       ) && motionSubType !== "overturn";
-                    const canOverturnThisMotion = userCanOverturnMotion(motion);
+                    const canOverturnThisMotion = !isAdjourned && userCanOverturnMotion(motion);
                     const parentReferenceId =
                       motion.parentMotionId || (motionSubType === "overturn" ? motion.targetMotionId : null);
                     const parentMotionDetails = parentReferenceId
@@ -1136,6 +1426,30 @@ export default function Meetings() {
                       ? motion.revisionHistory[motion.revisionHistory.length - 1]
                       : null;
                     const pendingRevision = pendingRevisionParents.has(motionId);
+                    const discussionAllowed = motion.allowDiscussion !== false;
+                    const canReply = discussionAllowed && !isAdjourned;
+                    const canChairDecide =
+                      chairDecidesMotion && ["owner", "chair"].includes(myRole);
+                    const chairDecisionSubmitting = Boolean(chairDecisionSubmittingMap[motionId]);
+                    const chairDecisionError = chairDecisionErrorMap[motionId];
+                    const statusText = chairDecidesMotion
+                      ? motion.chairDecision
+                        ? `Chair ruling: ${motion.chairDecision === "sustained" ? "Sustained" : "Denied"}`
+                        : "Awaiting chair decision"
+                      : specialRule
+                      ? isClosed
+                        ? `Voting closed — ${resultLabel}${resultSuffix}`
+                        : "Voting open — SPECIAL MOTION"
+                      : isClosed
+                      ? `Voting closed — ${resultLabel}${resultSuffix}`
+                      : "Voting open";
+                    const statusColor = chairDecidesMotion
+                      ? motion.chairDecision
+                        ? "#0b8457"
+                        : "#5d4037"
+                      : isClosed
+                      ? "#b71c1c"
+                      : "#0b8457";
                     const canShowSubActions =
                       canManageMotions &&
                       motionSubType === "none" &&
@@ -1143,7 +1457,9 @@ export default function Meetings() {
                       motion.status === "open" &&
                       !isMotionOverturned &&
                       !motionIsPostponed &&
-                      !pendingRevision;
+                      !pendingRevision &&
+                      !isSpecialMotionCard &&
+                      !isAdjourned;
                     return (
                       <div
                         key={`motion-${motionId}-${i}`}
@@ -1163,12 +1479,30 @@ export default function Meetings() {
                           </span>{" "}
                           <b>Motion:</b> {displayTitle} — <i>{motion.proposer}</i>
                         </div>
-                        {votingMode === "anonymous" && (
+                        {isSpecialMotionCard && (
+                          <div style={{ marginBottom: 6 }}>
+                            <span
+                              style={{
+                                display: "inline-block",
+                                background: "#fdecea",
+                                color: "#b3261e",
+                                borderRadius: 999,
+                                padding: "2px 10px",
+                                fontSize: "0.75rem",
+                                fontWeight: 600,
+                                textTransform: "uppercase",
+                              }}
+                            >
+                              {`Special motion${specialRule?.label ? ` — ${specialRule.label}` : ""}`}
+                            </span>
+                          </div>
+                        )}
+                        {showVoteControls && votingMode === "anonymous" && (
                           <div style={{ marginTop: 4, fontSize: "0.85rem", color: "#555" }}>
                             Total voters: {anonymousVoters.length}
                           </div>
                         )}
-                        {votingMode === "anonymous" && userVotedAnonymous && !isClosed && (
+                        {showVoteControls && votingMode === "anonymous" && userVotedAnonymous && !isClosed && (
                           <div style={{ marginTop: 4, fontSize: "0.85rem", color: "#b00020" }}>
                             You have already voted on this motion (anonymous).
                           </div>
@@ -1179,7 +1513,8 @@ export default function Meetings() {
                           </div>
                         )}
                         <div style={{ fontSize: "0.85rem", color: "#555", marginBottom: 6 }}>
-                          {typeLabel} · Voting mode: {votingModeLabel}
+                          {typeDescription}
+                          {showVoteControls ? ` · Voting mode: ${votingModeLabel}` : ""}
                         </div>
                         {pendingRevision && motionSubType === "none" && (
                           <div style={{ marginBottom: 6, fontSize: "0.85rem", color: "#8c3700" }}>
@@ -1230,71 +1565,149 @@ export default function Meetings() {
                           </div>
                         )}
                         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                          <button
-                            type="button"
-                            disabled={voteButtonsDisabled}
-                            onClick={(e) => { e.stopPropagation(); if (!voteButtonsDisabled) toggleVote(motionId, "up"); }}
-                            style={{
-                              background: userVote === "up" ? "#0b8457" : "#e0f1ea",
-                              color: userVote === "up" ? "#fff" : "#000",
-                              border: "none",
-                              padding: "6px 10px",
-                              borderRadius: 6,
-                              cursor: voteButtonsDisabled ? "not-allowed" : "pointer",
-                              opacity: voteButtonsDisabled ? 0.6 : 1,
-                            }}
-                          >
-                            👍 {motion.votes?.up ?? 0}
-                          </button>
-                          <button
-                            type="button"
-                            disabled={voteButtonsDisabled}
-                            onClick={(e) => { e.stopPropagation(); if (!voteButtonsDisabled) toggleVote(motionId, "down"); }}
-                            style={{
-                              background: userVote === "down" ? "#b71c1c" : "#fdecea",
-                              color: userVote === "down" ? "#fff" : "#000",
-                              border: "none",
-                              padding: "6px 10px",
-                              borderRadius: 6,
-                              cursor: voteButtonsDisabled ? "not-allowed" : "pointer",
-                              opacity: voteButtonsDisabled ? 0.6 : 1,
-                            }}
-                          >
-                            👎 {motion.votes?.down ?? 0}
-                          </button>
-                          {canManageMotions && !isClosed && !motionIsPostponed && (
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                openCloseVotingModalForMotion(motion);
-                              }}
-                              style={{
-                                borderRadius: 6,
-                                border: "1px solid #b71c1c",
-                                background: "#fff",
-                                color: "#b71c1c",
-                                padding: "6px 10px",
-                                fontWeight: 600,
-                                cursor: "pointer",
-                              }}
-                            >
-                              Close Voting
-                            </button>
+                          {showVoteControls && (
+                            <>
+                              <button
+                                type="button"
+                                disabled={voteButtonsDisabled}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (!voteButtonsDisabled) toggleVote(motionId, "up");
+                                }}
+                                style={{
+                                  background: userVote === "up" ? "#0b8457" : "#e0f1ea",
+                                  color: userVote === "up" ? "#fff" : "#000",
+                                  border: "none",
+                                  padding: "6px 10px",
+                                  borderRadius: 6,
+                                  cursor: voteButtonsDisabled ? "not-allowed" : "pointer",
+                                  opacity: voteButtonsDisabled ? 0.6 : 1,
+                                }}
+                              >
+                                👍 {motion.votes?.up ?? 0}
+                              </button>
+                              <button
+                                type="button"
+                                disabled={voteButtonsDisabled}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (!voteButtonsDisabled) toggleVote(motionId, "down");
+                                }}
+                                style={{
+                                  background: userVote === "down" ? "#b71c1c" : "#fdecea",
+                                  color: userVote === "down" ? "#fff" : "#000",
+                                  border: "none",
+                                  padding: "6px 10px",
+                                  borderRadius: 6,
+                                  cursor: voteButtonsDisabled ? "not-allowed" : "pointer",
+                                  opacity: voteButtonsDisabled ? 0.6 : 1,
+                                }}
+                              >
+                                👎 {motion.votes?.down ?? 0}
+                              </button>
+                          {canManageMotions && !isClosed && !motionIsPostponed && !isAdjourned && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    openCloseVotingModalForMotion(motion);
+                                  }}
+                                  style={{
+                                    borderRadius: 6,
+                                    border: "1px solid #b71c1c",
+                                    background: "#fff",
+                                    color: "#b71c1c",
+                                    padding: "6px 10px",
+                                    fontWeight: 600,
+                                    cursor: "pointer",
+                                  }}
+                                >
+                                  Close Voting
+                                </button>
+                              )}
+                            </>
                           )}
                           <span
                             style={{
                               marginLeft: "auto",
                               fontWeight: 600,
-                              color: isClosed ? "#b71c1c" : "#0b8457",
+                              color: statusColor,
                             }}
                           >
-                            {isClosed ? `Voting closed — ${resultLabel}${resultSuffix}` : "Voting open"}
+                            {statusText}
                           </span>
                         </div>
-                        {isClosed && (
+                        {isClosed && showVoteControls && (
                           <div style={{ marginTop: 6, fontSize: "0.9rem", color: "#555" }}>
                             Final tally: 👍 {motion.votes?.up ?? 0} / 👎 {motion.votes?.down ?? 0}
+                          </div>
+                        )}
+                        {chairDecidesMotion && (
+                          <div
+                            style={{
+                              marginTop: 8,
+                              padding: "8px 10px",
+                              borderRadius: 6,
+                              border: "1px solid #ffd7a8",
+                              background: "#fff9ef",
+                            }}
+                          >
+                            {motion.chairDecision ? (
+                              <div style={{ fontWeight: 600, color: "#5d4037" }}>
+                                Chair ruling:{" "}
+                                {motion.chairDecision === "sustained" ? "Sustained" : "Denied"}
+                              </div>
+                            ) : canChairDecide ? (
+                              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleChairDecision(motionId, "sustained");
+                                  }}
+                                  disabled={chairDecisionSubmitting}
+                                  style={{
+                                    borderRadius: 6,
+                                    border: "1px solid #0b8457",
+                                    background: chairDecisionSubmitting ? "#9acfb8" : "#e0f1ea",
+                                    color: "#0b8457",
+                                    padding: "6px 10px",
+                                    fontWeight: 600,
+                                    cursor: chairDecisionSubmitting ? "not-allowed" : "pointer",
+                                  }}
+                                >
+                                  Rule in favor
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleChairDecision(motionId, "denied");
+                                  }}
+                                  disabled={chairDecisionSubmitting}
+                                  style={{
+                                    borderRadius: 6,
+                                    border: "1px solid #b71c1c",
+                                    background: chairDecisionSubmitting ? "#f6cac6" : "#fdecea",
+                                    color: "#b71c1c",
+                                    padding: "6px 10px",
+                                    fontWeight: 600,
+                                    cursor: chairDecisionSubmitting ? "not-allowed" : "pointer",
+                                  }}
+                                >
+                                  Deny
+                                </button>
+                              </div>
+                            ) : (
+                              <div style={{ color: "#5d4037" }}>
+                                Awaiting chair decision.
+                              </div>
+                            )}
+                            {chairDecisionError && (
+                              <div style={{ marginTop: 6, color: "#b00020", fontSize: "0.85rem" }}>
+                                {chairDecisionError}
+                              </div>
+                            )}
                           </div>
                         )}
                         {motionIsPostponed && (
@@ -1393,7 +1806,12 @@ export default function Meetings() {
                             Note: Motion text revised via procedural motion.
                           </div>
                         )}
-                        {isClosed && votingMode === "named" && (
+                        {!discussionAllowed && (
+                          <div style={{ marginTop: 12, fontSize: "0.85rem", color: "#7c4a00" }}>
+                            Discussion is not allowed for this motion.
+                          </div>
+                        )}
+                        {isClosed && votingMode === "named" && showVoteControls && (
                           <div style={{ marginTop: 6 }}>
                             <button
                               type="button"
@@ -1436,106 +1854,136 @@ export default function Meetings() {
                             )}
                           </div>
                         )}
-                        <div
-                          className="motion-reply-section"
-                          style={{ marginTop: 12, borderTop: "1px solid #f1c7c7", paddingTop: 8 }}
-                        >
-                          {replies.length > 0 && (
-                            <div className="motion-reply-list" style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 6 }}>
-                              {replies.map((reply) => {
-                                const stanceLabel =
-                                  reply.stance === "pro" ? "Pro" : reply.stance === "con" ? "Con" : "Neutral";
-                                const stanceStyles = {
-                                  pro: { background: "#e6ffed", color: "#137333" },
-                                  con: { background: "#ffe6e6", color: "#b00020" },
-                                  neutral: { background: "#f3f3f3", color: "#555" },
-                                };
-                                const stanceStyle = stanceStyles[reply.stance] || stanceStyles.neutral;
-                                const replyAuthor =
-                                  reply.authorDisplayName ||
-                                  reply.authorUsername ||
-                                  reply.author ||
-                                  "Unknown";
-                                return (
-                                  <div
-                                    key={reply._id || reply.createdAt}
-                                    className={`motion-reply motion-reply--${reply.stance}`}
-                                    style={{ padding: 6, borderRadius: 6, background: "#fff5f5" }}
-                                  >
-                                    <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "0.85rem", marginBottom: 4 }}>
-                                      <span style={{ fontWeight: 600 }}>{replyAuthor}</span>
-                                      <span
-                                        className="motion-reply-stance-tag"
-                                        style={{
-                                          padding: "0.1rem 0.5rem",
-                                          borderRadius: 999,
-                                          fontSize: "0.75rem",
-                                          ...stanceStyle,
-                                        }}
-                                      >
-                                        {stanceLabel}
-                                      </span>
-                                      <span style={{ marginLeft: "auto", color: "#666" }}>
-                                        {reply.createdAt ? new Date(reply.createdAt).toLocaleTimeString() : ""}
-                                      </span>
+                        {(discussionAllowed || replies.length > 0) && (
+                          <div
+                            className="motion-reply-section"
+                            style={{ marginTop: 12, borderTop: "1px solid #f1c7c7", paddingTop: 8 }}
+                          >
+                            {replies.length > 0 && (
+                              <div className="motion-reply-list" style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 6 }}>
+                                {replies.map((reply) => {
+                                  const stanceLabel =
+                                    reply.stance === "pro" ? "Pro" : reply.stance === "con" ? "Con" : "Neutral";
+                                  const stanceStyles = {
+                                    pro: { background: "#e6ffed", color: "#137333" },
+                                    con: { background: "#ffe6e6", color: "#b00020" },
+                                    neutral: { background: "#f3f3f3", color: "#555" },
+                                  };
+                                  const stanceStyle = stanceStyles[reply.stance] || stanceStyles.neutral;
+                                  const replyAuthor =
+                                    reply.authorDisplayName ||
+                                    reply.authorUsername ||
+                                    reply.author ||
+                                    "Unknown";
+                                  return (
+                                    <div
+                                      key={reply._id || reply.createdAt}
+                                      className={`motion-reply motion-reply--${reply.stance}`}
+                                      style={{ padding: 6, borderRadius: 6, background: "#fff5f5" }}
+                                    >
+                                      <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "0.85rem", marginBottom: 4 }}>
+                                        <span style={{ fontWeight: 600 }}>{replyAuthor}</span>
+                                        <span
+                                          className="motion-reply-stance-tag"
+                                          style={{
+                                            padding: "0.1rem 0.5rem",
+                                            borderRadius: 999,
+                                            fontSize: "0.75rem",
+                                            ...stanceStyle,
+                                          }}
+                                        >
+                                          {stanceLabel}
+                                        </span>
+                                        <span style={{ marginLeft: "auto", color: "#666" }}>
+                                          {reply.createdAt ? new Date(reply.createdAt).toLocaleTimeString() : ""}
+                                        </span>
+                                      </div>
+                                      <div style={{ color: "#333" }}>{reply.text}</div>
                                     </div>
-                                    <div style={{ color: "#333" }}>{reply.text}</div>
-                                  </div>
-                                );
+                                  );
                               })}
                             </div>
                           )}
-                          <div
-                            className="motion-reply-input-row"
-                            style={{ display: "flex", gap: 8, alignItems: "center" }}
-                          >
-                            <input
-                              type="text"
-                              className="motion-reply-input"
-                              placeholder="Reply to this motion..."
-                              value={replyText}
-                              onChange={(e) =>
-                                setReplyTextMap((prev) => ({ ...prev, [motionId]: e.target.value }))
-                              }
-                              style={{ flex: 1, borderRadius: 6, border: "1px solid #b0b0b0", padding: 6 }}
-                            />
-                            <select
-                              className="motion-reply-stance-select"
-                              value={replyStance}
-                              onChange={(e) =>
-                                setReplyStanceMap((prev) => ({ ...prev, [motionId]: e.target.value }))
-                              }
-                              style={{ borderRadius: 6, border: "1px solid #b0b0b0", padding: "6px 8px" }}
-                            >
-                              <option value="neutral">Neutral</option>
-                              <option value="pro">Pro</option>
-                              <option value="con">Con</option>
-                            </select>
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                submitReply(motionId);
-                              }}
-                              disabled={replySubmitting || !replyText.trim()}
-                              style={{
-                                borderRadius: 6,
-                                background: !replyText.trim() ? "#9fbfdc" : "#0582CA",
-                                color: "#fff",
-                                border: "none",
-                                padding: "6px 12px",
-                                fontWeight: 600,
-                                cursor: !replyText.trim() ? "not-allowed" : "pointer",
-                                opacity: replySubmitting ? 0.6 : 1,
-                              }}
-                            >
-                              {replySubmitting ? "Replying..." : "Reply"}
-                            </button>
-                          </div>
+                          {discussionAllowed && (
+                            <>
+                              <div
+                                className="motion-reply-input-row"
+                                style={{ display: "flex", gap: 8, alignItems: "center" }}
+                              >
+                                <input
+                                  type="text"
+                                  className="motion-reply-input"
+                                  placeholder={
+                                    canReply ? "Reply to this motion..." : "Meeting adjourned — replies closed."
+                                  }
+                                  value={replyText}
+                                  onChange={(e) =>
+                                    setReplyTextMap((prev) => ({ ...prev, [motionId]: e.target.value }))
+                                  }
+                                  disabled={!canReply}
+                                  style={{
+                                    flex: 1,
+                                    borderRadius: 6,
+                                    border: "1px solid #b0b0b0",
+                                    padding: 6,
+                                    background: !canReply ? "#f1f1f1" : "#fff",
+                                    color: !canReply ? "#777" : "#000",
+                                  }}
+                                />
+                                <select
+                                  className="motion-reply-stance-select"
+                                  value={replyStance}
+                                  onChange={(e) =>
+                                    setReplyStanceMap((prev) => ({ ...prev, [motionId]: e.target.value }))
+                                  }
+                                  disabled={!canReply}
+                                  style={{
+                                    borderRadius: 6,
+                                    border: "1px solid #b0b0b0",
+                                    padding: "6px 8px",
+                                    background: !canReply ? "#f1f1f1" : "#fff",
+                                    color: !canReply ? "#777" : "#000",
+                                  }}
+                                >
+                                  <option value="neutral">Neutral</option>
+                                  <option value="pro">Pro</option>
+                                  <option value="con">Con</option>
+                                </select>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    submitReply(motionId);
+                                  }}
+                                  disabled={!canReply || replySubmitting || !replyText.trim()}
+                                  style={{
+                                    borderRadius: 6,
+                                    background:
+                                      !canReply || !replyText.trim() ? "#9fbfdc" : "#0582CA",
+                                    color: "#fff",
+                                    border: "none",
+                                    padding: "6px 12px",
+                                    fontWeight: 600,
+                                    cursor:
+                                      !canReply || !replyText.trim() ? "not-allowed" : "pointer",
+                                    opacity: replySubmitting ? 0.6 : 1,
+                                  }}
+                                >
+                                  {replySubmitting ? "Replying..." : "Reply"}
+                                </button>
+                              </div>
+                              {!canReply && (
+                                <div style={{ color: "#7c4a00", fontSize: "0.85rem", marginTop: 6 }}>
+                                  {meetingAdjournedMessage}
+                                </div>
+                              )}
+                            </>
+                          )}
                           {replyError && (
                             <div style={{ color: "red", fontSize: "0.85rem", marginTop: 4 }}>{replyError}</div>
                           )}
                         </div>
+                      )}
                       </div>
                     );
                   }
@@ -1582,26 +2030,31 @@ export default function Meetings() {
                     type="text"
                     value={messageText}
                     onChange={(e) => setMessageText(e.target.value)}
-                    placeholder="Type a message..."
+                    placeholder={chatInputPlaceholder}
+                    disabled={isAdjourned}
                     style={{
                       flex: 1,
                       borderRadius: 6,
                       border: "1px solid #b0b0b0",
                       padding: 8,
                       fontSize: "0.95rem",
+                      background: isAdjourned ? "#f1f1f1" : "#fff",
+                      color: isAdjourned ? "#777" : "#000",
                     }}
                   />
                   <button
                     type="submit"
                     disabled={!canSend || !messageText.trim()}
+                    title={!canSend ? (isAdjourned ? meetingAdjournedMessage : "Log in to send messages.") : undefined}
                     style={{
                       borderRadius: 6,
-                      background: !messageText.trim() ? "#9fbfdc" : "#0582CA",
+                      background:
+                        !messageText.trim() || !canSend ? "#9fbfdc" : "#0582CA",
                       color: "#fff",
                       border: "none",
                       padding: "8px 16px",
                       fontWeight: 600,
-                      cursor: !messageText.trim() ? "not-allowed" : "pointer",
+                      cursor: !messageText.trim() || !canSend ? "not-allowed" : "pointer",
                     }}
                   >
                     Send
@@ -1612,16 +2065,16 @@ export default function Meetings() {
                     <button
                       type="button"
                       onClick={openRaiseMotionModal}
-                      disabled={!canRaiseMotion}
-                      title={!canRaiseMotion ? "Only the chair or owner can raise motions." : undefined}
+                      disabled={raiseButtonDisabled}
+                      title={raiseButtonTitle}
                       style={{
                         borderRadius: 6,
-                        background: !canRaiseMotion ? "#f4c8c8" : "#e53935",
+                        background: raiseButtonDisabled ? "#f4c8c8" : "#e53935",
                         color: "#fff",
                         border: "none",
                         padding: "6px 12px",
                         fontWeight: 600,
-                        cursor: !canRaiseMotion ? "not-allowed" : "pointer",
+                        cursor: raiseButtonDisabled ? "not-allowed" : "pointer",
                       }}
                     >
                       Raise Motion
@@ -1827,28 +2280,56 @@ export default function Meetings() {
             </FormGroup>
             <FormGroup label="Motion type">
               <RadioGroup
-                onChange={(e) => setMotionType(e.target.value)}
+                onChange={(e) => handleMotionTypeChange(e.target.value)}
                 selectedValue={motionType}
                 inline
                 disabled={isSubMotionMode}
               >
                 <Radio value="standard" label="Standard (50%)" />
                 <Radio value="procedure" label="Procedural (66%)" />
+                <Radio value="special" label="Special motion" />
               </RadioGroup>
-              <p style={{ marginTop: 4, color: "#555" }}>
-                Standard motions pass with &gt; 50% in favor. Procedural motions typically require at least two-thirds.
-              </p>
+              {motionType !== "special" ? (
+                <p style={{ marginTop: 4, color: "#555" }}>
+                  Standard motions pass with &gt; 50% in favor. Procedural motions typically require at
+                  least two-thirds.
+                </p>
+              ) : (
+                <p style={{ marginTop: 4, color: "#555" }}>
+                  Special motions have fixed rules and thresholds based on parliamentary procedure.
+                </p>
+              )}
             </FormGroup>
-            <FormGroup label="Voting style">
-              <RadioGroup
-                onChange={(e) => setMotionVotingMode(e.target.value)}
-                selectedValue={motionVotingMode}
-                inline
-              >
-                <Radio value="named" label="Named (record each vote)" />
-                <Radio value="anonymous" label="Anonymous (only show totals)" />
-              </RadioGroup>
-            </FormGroup>
+            {motionType === "special" && (
+              <FormGroup label="Special motion type">
+                <select
+                  className="bp4-input"
+                  value={specialMotionType}
+                  onChange={(e) => handleSpecialMotionTypeChange(e.target.value)}
+                >
+                  {SPECIAL_MOTION_TYPES.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+                <p style={{ marginTop: 4, color: "#555" }}>
+                  {SPECIAL_MOTION_RULES[specialMotionType]?.summary || "Special motion"}
+                </p>
+              </FormGroup>
+            )}
+            {motionType !== "special" && (
+              <FormGroup label="Voting style">
+                <RadioGroup
+                  onChange={(e) => setMotionVotingMode(e.target.value)}
+                  selectedValue={motionVotingMode}
+                  inline
+                >
+                  <Radio value="named" label="Named (record each vote)" />
+                  <Radio value="anonymous" label="Anonymous (only show totals)" />
+                </RadioGroup>
+              </FormGroup>
+            )}
             {motionError && (
               <p style={{ color: "red", marginTop: 8 }}>{motionError}</p>
             )}

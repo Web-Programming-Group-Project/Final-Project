@@ -129,6 +129,8 @@ const MeetingSchema = new mongoose.Schema(
     title:   { type: String, required: true },
     code:    { type: String, required: true, unique: true },
     open:    { type: Boolean, default: true },
+    adjourned: { type: Boolean, default: false },
+    adjournedAt: { type: Date, default: null },
     creator: { type: String, required: true, alias: "createdBy" }, // username of creator
     visibility: { type: String, enum: ["private"], default: "private" },
 

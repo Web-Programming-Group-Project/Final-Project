@@ -100,6 +100,42 @@ function getMotionSubTypeValue(motion) {
   return (raw || "none").toLowerCase();
 }
 
+const SPECIAL_MOTION_RULES = {
+  adjourn: {
+    label: "Adjourn meeting",
+    needsVote: true,
+    threshold: 0.5,
+    allowDiscussion: false,
+  },
+  closeDebate: {
+    label: "Close debate (Previous Question)",
+    needsVote: true,
+    threshold: 2 / 3,
+    allowDiscussion: false,
+  },
+};
+
+function thresholdToPercentage(value) {
+  if (typeof value !== "number" || Number.isNaN(value)) return null;
+  const percent = value <= 1 ? value * 100 : value;
+  return Math.round(percent * 100) / 100;
+}
+
+function isMeetingAdjourned(meeting) {
+  if (!meeting) return false;
+  return Boolean(meeting.adjourned || meeting.open === false);
+}
+
+const MEETING_ADJOURNED_MESSAGE = "Meeting has been adjourned. No further changes are allowed.";
+
+function guardAdjournedMeeting(meeting, res) {
+  if (isMeetingAdjourned(meeting)) {
+    res.status(400).json({ message: MEETING_ADJOURNED_MESSAGE });
+    return true;
+  }
+  return false;
+}
+
 async function getMeetingByCode(code) {
   return Meeting.findOne({ code: (code || "").toUpperCase() });
 }
@@ -205,6 +241,14 @@ app.get("/meetings", async (req, res) => {
 app.get("/meetings/:code", async (req, res) => {
   const mtg = await getMeetingByCode(req.params.code);
   if (!mtg) return res.status(404).json({ message: "Meeting not found" });
+  if (isMeetingAdjourned(mtg)) {
+    return res.status(400).json({ message: MEETING_ADJOURNED_MESSAGE });
+  }
+  if (isMeetingAdjourned(mtg)) {
+    return res.status(400).json({ message: MEETING_ADJOURNED_MESSAGE });
+  }
+  if (guardAdjournedMeeting(mtg, res)) return;
+  if (guardAdjournedMeeting(mtg, res)) return;
   res.json({ meeting: mtg });
 });
 
@@ -222,6 +266,8 @@ app.post("/meetings/join", async (req, res) => {
       defaultRole: "member",
     });
     if (!meeting) return res.status(404).json({ message: "Meeting not found" });
+    if (guardAdjournedMeeting(meeting, res)) return;
+    if (guardAdjournedMeeting(meeting, res)) return;
 
     const role = participant?.role || "member";
     const name = participant?.displayName || username;
@@ -268,23 +314,56 @@ app.post("/meetings/:code/motions", async (req, res) => {
   const motionTypeInput = (req.body?.motionType ?? req.body?.type ?? "").toLowerCase();
   const votingModeInput = (req.body?.votingMode || "").toLowerCase();
   const subTypeInput = (req.body?.subType || req.body?.motionSubType || "none").toLowerCase();
+  const motionCategoryInput = (req.body?.motionCategory || "").toLowerCase();
+  const specialMotionTypeInputRaw = (req.body?.specialMotionType || "").trim();
+  const specialMotionTypeInput = Object.keys(SPECIAL_MOTION_RULES).find(
+    (key) => key.toLowerCase() === specialMotionTypeInputRaw.toLowerCase()
+  );
   const parentMotionId = req.body?.parentMotionId || req.body?.targetMotionId || null;
   const postponeUntil = (req.body?.postponeUntil || "").trim();
 
+  const isSpecialMotion = motionCategoryInput === "special";
+  const specialRule = isSpecialMotion ? SPECIAL_MOTION_RULES[specialMotionTypeInput] : null;
   const allowedSubTypes = ["none", "overturn", "revise", "postpone"];
   const normalizedSubType = allowedSubTypes.includes(subTypeInput) ? subTypeInput : "none";
   const isSubMotion = normalizedSubType !== "none";
+  if (isSpecialMotion && isSubMotion) {
+    return res.status(400).json({ message: "Special motions cannot be raised as sub-motions." });
+  }
   const motionTypeIsProcedural =
     isSubMotion || motionTypeInput === "procedural" || motionTypeInput === "procedure";
-  const motionType = motionTypeIsProcedural ? "procedure" : "standard";
-  const requiredPercentage = motionType === "procedure" ? 66 : 50;
-  const title = rawTitle || rawLegacyText;
-  const votingMode = votingModeInput === "anonymous" ? "anonymous" : "named";
+  let motionType = motionTypeIsProcedural ? "procedure" : "standard";
+  if (isSpecialMotion) {
+    motionType = "procedure";
+  }
+  let requiredPercentage = motionType === "procedure" ? 66 : 50;
+  if (isSpecialMotion) {
+    if (!specialRule) {
+      return res.status(400).json({ message: "Invalid special motion type." });
+    }
+    requiredPercentage = specialRule.needsVote
+      ? thresholdToPercentage(specialRule.threshold) ?? 50
+      : 0;
+  }
+  let title = rawTitle || rawLegacyText;
+  if (isSpecialMotion && !title) {
+    title = specialRule.label;
+  }
+  const votingMode = isSpecialMotion
+    ? "named"
+    : votingModeInput === "anonymous"
+    ? "anonymous"
+    : "named";
 
   if (!username || !title) return res.status(400).json({ message: "username and motion title are required" });
 
   const mtg = await getMeetingByCode(req.params.code);
   if (!mtg) return res.status(404).json({ message: "Meeting not found" });
+  if (guardAdjournedMeeting(mtg, res)) return;
+  const participantRole = getUserRole(mtg, username);
+  if (!participantRole) {
+    return res.status(403).json({ message: "You must be a participant of this meeting to raise motions." });
+  }
 
   let parentMotion = null;
   if (["revise", "postpone"].includes(normalizedSubType)) {
@@ -303,18 +382,29 @@ app.post("/meetings/:code/motions", async (req, res) => {
   }
 
   const isOverturn = normalizedSubType === "overturn";
+  let motionCategory = "standard";
+  if (isSpecialMotion) {
+    motionCategory = "special";
+  } else if (isSubMotion) {
+    motionCategory = "submotion";
+  } else if (motionType === "procedure") {
+    motionCategory = "procedural";
+  }
   const motionPayload = {
     proposer: username,
     title,
     description: rawDescription || undefined,
     text: rawLegacyText || title,
     type: motionType,
+    motionCategory,
+    specialMotionType: isSpecialMotion ? specialMotionTypeInput : undefined,
     requiredPercentage,
     status: "open",
     outcome: "pending",
     votes: { up: 0, down: 0 },
     votingMode,
     anonymousVotedUsers: [],
+    allowDiscussion: isSpecialMotion ? specialRule.allowDiscussion !== false : true,
     isOverturn,
     subType: normalizedSubType,
     subMotionType: normalizedSubType,
@@ -341,6 +431,13 @@ app.post("/meetings/:code/motions/:motionId/vote", async (req, res) => {
 
   const motion = mtg.motions.id(req.params.motionId);
   if (!motion) return res.status(404).json({ message: "Motion not found" });
+  const motionCategory = (motion.motionCategory || "").toLowerCase();
+  if (motionCategory === "special") {
+    const specialRule = SPECIAL_MOTION_RULES[motion.specialMotionType] || null;
+    if (!specialRule || specialRule.needsVote === false) {
+      return res.status(400).json({ message: "This special motion is decided by the chair and does not accept votes." });
+    }
+  }
   if (motion.status === "closed") {
     return res.status(400).json({ message: "Voting is closed for this motion." });
   }
@@ -396,6 +493,7 @@ app.post("/meetings/:meetingId/motions/overturn", async (req, res) => {
 
   const meeting = await Meeting.findById(meetingId);
   if (!meeting) return res.status(404).json({ message: "Meeting not found" });
+  if (guardAdjournedMeeting(meeting, res)) return;
 
   const targetMotion = meeting.motions.id(targetMotionId);
   if (!targetMotion) {
@@ -483,6 +581,15 @@ async function closeMotionRoute(req, res) {
 
   const motion = mtg.motions.id(req.params.motionId);
   if (!motion) return res.status(404).json({ message: "Motion not found" });
+  const closingMotionCategory = (motion.motionCategory || "").toLowerCase();
+  const motionSpecialType = (motion.specialMotionType || "").toLowerCase();
+  const isLegacyPointOfOrder =
+    closingMotionCategory === "special" && motionSpecialType === "pointoforder";
+  const closingSpecialRule =
+    closingMotionCategory === "special" ? SPECIAL_MOTION_RULES[motion.specialMotionType] || null : null;
+  if (isLegacyPointOfOrder || (closingSpecialRule && closingSpecialRule.needsVote === false)) {
+    return res.status(400).json({ message: "This special motion is decided directly by the chair." });
+  }
   if (motion.status === "closed") {
     return res.json({ message: "Motion already closed", motion });
   }
@@ -494,16 +601,22 @@ async function closeMotionRoute(req, res) {
   const yesPercentage = total === 0 ? 0 : (up / total) * 100;
   const passed = yesPercentage >= required;
 
+  const closedTimestamp = new Date();
   motion.status = "closed";
   motion.outcome = passed ? "passed" : "failed";
-  motion.closedAt = new Date();
-  motion.updatedAt = new Date();
+  motion.closedAt = closedTimestamp;
+  motion.updatedAt = closedTimestamp;
   motion.decisionSummary = decisionSummary || "";
   motion.prosSummary = prosSummary || "";
   motion.consSummary = consSummary || "";
 
   const displayTitle = motion.title || motion.text || "Untitled motion";
-  let summary = `${motion.type === "procedure" ? "Procedural motion" : "Motion"} "${displayTitle}" ${passed ? "PASSED" : "FAILED"} (${up} in favor, ${down} against; required ${required}%, got ${Math.round(yesPercentage)}% — ${ (motion.votingMode || "named") === "anonymous" ? "anonymous vote" : "named vote" }).`;
+  const motionKindLabel = closingSpecialRule
+    ? `Special motion (${closingSpecialRule.label || "Special"})`
+    : motion.type === "procedure"
+    ? "Procedural motion"
+    : "Motion";
+  let summary = `${motionKindLabel} "${displayTitle}" ${passed ? "PASSED" : "FAILED"} (${up} in favor, ${down} against; required ${required}%, got ${Math.round(yesPercentage)}% — ${ (motion.votingMode || "named") === "anonymous" ? "anonymous vote" : "named vote" }).`;
   if ((motion.decisionSummary || "").trim()) {
     summary += `\nSummary: ${motion.decisionSummary.trim()}`;
   }
@@ -513,6 +626,20 @@ async function closeMotionRoute(req, res) {
     text: summary,
     motionId: motion._id,
   });
+
+  const motionIsAdjournSpecial =
+    (motion.motionCategory || "").toLowerCase() === "special" &&
+    motion.specialMotionType === "adjourn";
+  if (motionIsAdjournSpecial && passed && !mtg.adjourned) {
+    mtg.adjourned = true;
+    mtg.open = false;
+    mtg.adjournedAt = closedTimestamp;
+    mtg.messages.push({
+      author: "System",
+      text: `System: Meeting adjourned by motion "${displayTitle}".`,
+      motionId: motion._id,
+    });
+  }
 
   const normalizedSubType = (motion.subType || motion.subMotionType || (motion.isOverturn ? "overturn" : "none")).toLowerCase();
   motion.subType = normalizedSubType;
@@ -690,6 +817,9 @@ app.get("/meetings/:code/export", async (req, res) => {
     const required = motion.requiredPercentage || (motion.type === "procedure" ? 66 : 50);
     const up = motion.votes?.up || 0;
     const down = motion.votes?.down || 0;
+    const motionCategory = (motion.motionCategory || "").toLowerCase();
+    const specialRule =
+      motionCategory === "special" ? SPECIAL_MOTION_RULES[motion.specialMotionType] || null : null;
     const motionSubType = getMotionSubTypeValue(motion);
     const isPostponed = (motion.outcome || "").toLowerCase() === "postponed";
     const overturnedByMotion =
@@ -717,10 +847,29 @@ app.get("/meetings/:code/export", async (req, res) => {
     const lastRevision =
       revisionHistory.length > 0 ? revisionHistory[revisionHistory.length - 1] : null;
 
-    const lines = [
-      `${idx + 1}. ${motionTitle} — ${outcomeDescription}. Final tally: ${up} in favor, ${down} against.`,
-      `   • Type: ${motion.type || "standard"} (requires ${required}%)`,
-    ];
+    const primaryLine =
+      specialRule && specialRule.needsVote === false
+        ? `${idx + 1}. ${motionTitle} — ${outcomeDescription}.`
+        : `${idx + 1}. ${motionTitle} — ${outcomeDescription}. Final tally: ${up} in favor, ${down} against.`;
+    const lines = [primaryLine];
+    if (specialRule) {
+      lines.push(`   • Type: Special motion — ${specialRule.label}`);
+      if (specialRule.needsVote !== false) {
+        lines.push(`   • Requires ${required}%.`);
+      } else {
+        const decisionLabel = motion.chairDecision
+          ? motion.chairDecision === "sustained"
+            ? "Sustained"
+            : "Denied"
+          : "Pending chair ruling";
+        lines.push(`   • Chair ruling: ${decisionLabel}.`);
+      }
+      if ((motion.description || "").trim()) {
+        lines.push(`   • Description: ${motion.description.trim()}`);
+      }
+    } else {
+      lines.push(`   • Type: ${motion.type || "standard"} (requires ${required}%)`);
+    }
     if (decisionSummary) {
       lines.push(`   • Decision summary: ${decisionSummary}`);
     }
@@ -847,6 +996,10 @@ app.get("/meetings/:code/export", async (req, res) => {
     "Overall Summary:",
     summary,
     "",
+    mtg.adjourned
+      ? `Status: Meeting adjourned${mtg.adjournedAt ? ` on ${new Date(mtg.adjournedAt).toLocaleString()}` : ""}.`
+      : "Status: Meeting active.",
+    "",
     "Motions and Decisions:",
     motionLines.length ? motionLines.join("\n\n") : "No motions recorded.",
     "",
@@ -877,6 +1030,9 @@ app.post("/meetings/:meetingId/motions/:motionId/replies", async (req, res) => {
 
     const motion = meeting.motions.id(motionId);
     if (!motion) return res.status(404).json({ message: "Motion not found" });
+    if (motion.allowDiscussion === false) {
+      return res.status(400).json({ message: "Discussion is not allowed for this motion." });
+    }
 
     motion.replies.push({
       authorUsername: username,
@@ -891,6 +1047,56 @@ app.post("/meetings/:meetingId/motions/:motionId/replies", async (req, res) => {
   } catch (err) {
     console.error("Error adding motion reply", err);
     res.status(500).json({ message: "Error adding reply", error: err.message });
+  }
+});
+
+app.post("/meetings/:meetingId/motions/:motionId/chair-decision", async (req, res) => {
+  const { meetingId, motionId } = req.params;
+  const { username, decision } = req.body || {};
+  const allowedDecisions = ["sustained", "denied"];
+  if (!username || !allowedDecisions.includes(decision)) {
+    return res.status(400).json({ message: "username and a valid decision are required" });
+  }
+
+  try {
+    const meeting = await Meeting.findById(meetingId);
+    if (!meeting) return res.status(404).json({ message: "Meeting not found" });
+
+    const role = getUserRole(meeting, username);
+    if (!["owner", "chair"].includes(role)) {
+      return res.status(403).json({ message: "Only the chair/owner can rule on a point of order." });
+    }
+
+    const motion = meeting.motions.id(motionId);
+    if (!motion) return res.status(404).json({ message: "Motion not found" });
+    const motionCategory = (motion.motionCategory || "").toLowerCase();
+    if (motionCategory !== "special" || motion.specialMotionType !== "pointOfOrder") {
+      return res.status(400).json({ message: "Chair decisions can only be recorded for point of order motions." });
+    }
+    if (motion.chairDecision) {
+      return res.status(400).json({ message: "This point of order has already been decided." });
+    }
+
+    motion.chairDecision = decision;
+    motion.status = "closed";
+    motion.outcome = decision === "sustained" ? "passed" : "failed";
+    motion.closedAt = new Date();
+    motion.updatedAt = new Date();
+    motion.decisionSummary = `Chair ruling: ${decision === "sustained" ? "Sustained" : "Denied"}.`;
+
+    const displayTitle = motion.title || motion.text || "Special motion";
+    const systemText = `System: Chair ruled on point of order "${displayTitle}" — ${decision}.`;
+    meeting.messages.push({
+      author: "System",
+      text: systemText,
+      motionId: motion._id,
+    });
+
+    await meeting.save();
+    res.json({ meeting });
+  } catch (err) {
+    console.error("Error recording chair decision", err);
+    res.status(500).json({ message: "Failed to record chair decision", error: err.message });
   }
 });
 
