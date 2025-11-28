@@ -21,16 +21,26 @@ export async function loginUser({ username, password }) {
   if (!res.ok) throw new Error(data.message || "Login failed");
   return data;
 }
-//For allowing the user to update their name
-export async function updateUser({ username, firstName, lastName }) {
-  const res = await fetch(`${API_BASE}/update`, {
-    method: "PUT",
+export async function getUserProfile({ username }) {
+  const res = await fetch(`${API_BASE}/users/${encodeURIComponent(username)}`);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.message || "Failed to load profile");
+  return data.user;
+}
+
+export async function updateUserProfile({ currentUsername, firstName, lastName, username, email, password }) {
+  const payload = { firstName, lastName, username, email };
+  if (typeof password === "string" && password.trim()) {
+    payload.password = password;
+  }
+  const res = await fetch(`${API_BASE}/users/${encodeURIComponent(currentUsername)}`, {
+    method: "PATCH",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ username, firstName, lastName }),
+    body: JSON.stringify(payload),
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.message || "Name update failed");
-  return data;
+  if (!res.ok) throw new Error(data.message || "Failed to update profile");
+  return data.user;
 }
 
 export async function listMeetings({ username, view = "my" }) {

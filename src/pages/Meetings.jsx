@@ -293,19 +293,24 @@ export default function Meetings() {
     ? "Submit Special Motion"
     : "Submit Motion";
 
-  const myRole =
-    meeting?.participants?.find((p) => p.username === username)?.role || "member";
-  const canManageMotions = ["owner", "chair"].includes(myRole);
-  const canRaiseMotionBase = canManageMotions;
+  const participants = meeting?.participants || [];
+  const myRole = participants.find((p) => p.username === username)?.role || "member";
+  const normalizedRole = (myRole || "").toLowerCase();
+  const otherChairExists = participants.some(
+    (p) => (p.role || "").toLowerCase() === "chair" && p.username !== username
+  );
+  const canManageMotions = ["owner", "chair"].includes(normalizedRole);
+  const canRaiseMotionBase = ["owner", "chair", "member"].includes(normalizedRole);
   const canRaiseMotion = canRaiseMotionBase && !isAdjourned;
-  const showRaiseButton = myRole !== "observer";
+  const showRaiseButton = normalizedRole !== "observer";
+  const canCloseVotingRole = normalizedRole === "chair" || (normalizedRole === "owner" && !otherChairExists);
   const canSend = Boolean(username) && !isAdjourned;
   const chatInputPlaceholder = isAdjourned
     ? "Meeting adjourned — chat is closed."
     : "Type a message...";
   const raiseButtonDisabled = !canRaiseMotion;
   const raiseButtonTitle = !canRaiseMotionBase
-    ? "Only the chair or owner can raise motions."
+    ? "You do not have permission to raise motions."
     : isAdjourned
     ? meetingAdjournedMessage
     : undefined;
@@ -627,7 +632,7 @@ export default function Meetings() {
   }
 
   function openCloseVotingModalForMotion(motion) {
-    if (!canManageMotions) return;
+    if (!canCloseVotingRole) return;
     if (isAdjourned) {
       window.alert(meetingAdjournedMessage);
       return;
@@ -1605,7 +1610,7 @@ export default function Meetings() {
                               >
                                 👎 {motion.votes?.down ?? 0}
                               </button>
-                          {canManageMotions && !isClosed && !motionIsPostponed && !isAdjourned && (
+                          {canCloseVotingRole && !isClosed && !motionIsPostponed && !isAdjourned && (
                                 <button
                                   type="button"
                                   onClick={(e) => {

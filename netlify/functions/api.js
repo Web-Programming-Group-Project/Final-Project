@@ -145,6 +145,19 @@ function getUserRole(meeting, username) {
   return participant ? participant.role : null;
 }
 
+function sanitizeUser(user) {
+  if (!user) return null;
+  return {
+    _id: user._id,
+    username: user.username,
+    email: user.email,
+    firstName: user.firstName,
+    lastName: user.lastName,
+    createdAt: user.createdAt,
+    updatedAt: user.updatedAt,
+  };
+}
+
 async function addOrUpdateParticipant({ code, username, displayName, defaultRole = "member" }) {
   const normalizedCode = (code || "").toUpperCase();
   if (!normalizedCode) throw new Error("Meeting code required");
@@ -356,6 +369,11 @@ app.post("/meetings/:code/motions", async (req, res) => {
   if (!participantRole) {
     return res.status(403).json({ message: "You must be a participant of this meeting to raise motions." });
   }
+  const participantRoleNormalized = String(participantRole || "").toLowerCase();
+  const allowedMotionRoles = ["owner", "chair", "member"];
+  if (!allowedMotionRoles.includes(participantRoleNormalized)) {
+    return res.status(403).json({ message: "You do not have permission to raise motions." });
+  }
 
   let parentMotion = null;
   if (["revise", "postpone"].includes(normalizedSubType)) {
@@ -566,9 +584,19 @@ async function closeMotionRoute(req, res) {
   const mtg = await getMeetingByCode(req.params.code);
   if (!mtg) return res.status(404).json({ message: "Meeting not found" });
 
-  const role = getUserRole(mtg, username);
-  if (!["owner", "chair"].includes(role)) {
-    return res.status(403).json({ message: "Only the chair/owner can close a motion" });
+  const participant = mtg.participants?.find((p) => p.username === username);
+  if (!participant) {
+    return res.status(403).json({ message: "You are not part of this meeting." });
+  }
+  const participantRole = String(participant.role || "").toLowerCase();
+  const otherChairExists = (mtg.participants || []).some(
+    (p) => String(p.role || "").toLowerCase() === "chair" && p.username !== participant.username
+  );
+  const canCloseVoting = participantRole === "chair" || (participantRole === "owner" && !otherChairExists);
+  if (!canCloseVoting) {
+    return res.status(403).json({
+      message: "Only the current chair (or owner when no chair is assigned) can close voting on motions.",
+    });
   }
 
   const motion = mtg.motions.id(req.params.motionId);
@@ -1151,6 +1179,66 @@ app.put("/update/bio", async (req, res) => {
   user.bio = bio;
   await user.save();
   res.json({ message: "Bio updated successfully", user});
+});
+
+app.get("/users/:username", async (req, res) => {
+  const { username } = req.params;
+  if (!username) {
+    return res.status(400).json({ message: "Username is required" });
+  }
+  try {
+    const user = await User.findOne({ username });
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+    res.json({ user: sanitizeUser(user) });
+  } catch (err) {
+    console.error("Error fetching user profile", err);
+    res.status(500).json({ message: "Failed to load profile", error: err.message });
+  }
+});
+
+app.patch("/users/:username", async (req, res) => {
+  const { username } = req.params;
+  const { firstName, lastName, email, username: nextUsername, password } = req.body || {};
+
+  if (!username) {
+    return res.status(400).json({ message: "Username is required" });
+  }
+  if (![firstName, lastName, email, nextUsername].every((value) => typeof value === "string" && value.trim())) {
+    return res.status(400).json({ message: "First name, last name, username, and email are required" });
+  }
+
+  try {
+    const user = await User.findOne({ username });
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    const normalizedNextUsername = nextUsername.trim();
+    if (normalizedNextUsername !== user.username) {
+      const existing = await User.findOne({
+        username: normalizedNextUsername,
+        _id: { $ne: user._id },
+      });
+      if (existing) {
+        return res.status(400).json({ message: "Username already taken" });
+      }
+    }
+
+    user.firstName = firstName.trim();
+    user.lastName = lastName.trim();
+    user.email = email.trim();
+    user.username = normalizedNextUsername;
+    if (typeof password === "string" && password.trim()) {
+      user.password = password;
+    }
+    await user.save();
+    res.json({ message: "Profile updated", user: sanitizeUser(user) });
+  } catch (err) {
+    console.error("Error updating user profile", err);
+    res.status(500).json({ message: "Failed to update profile", error: err.message });
+  }
 });
 
 
