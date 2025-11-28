@@ -241,14 +241,6 @@ app.get("/meetings", async (req, res) => {
 app.get("/meetings/:code", async (req, res) => {
   const mtg = await getMeetingByCode(req.params.code);
   if (!mtg) return res.status(404).json({ message: "Meeting not found" });
-  if (isMeetingAdjourned(mtg)) {
-    return res.status(400).json({ message: MEETING_ADJOURNED_MESSAGE });
-  }
-  if (isMeetingAdjourned(mtg)) {
-    return res.status(400).json({ message: MEETING_ADJOURNED_MESSAGE });
-  }
-  if (guardAdjournedMeeting(mtg, res)) return;
-  if (guardAdjournedMeeting(mtg, res)) return;
   res.json({ meeting: mtg });
 });
 
