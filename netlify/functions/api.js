@@ -4,7 +4,7 @@ const express = require("express");
 const mongoose = require("mongoose");
 const dotenv = require("dotenv");
 const cors = require("cors");
-const User = require("../../src/models/User"); 
+const User = require("../../src/models/User");
 const Meeting = require("../../src/models/Meeting");
 
 dotenv.config();
@@ -309,6 +309,139 @@ app.post("/meetings/:code/join", async (req, res) => {
     console.error("Error joining meeting", err);
     res.status(500).json({ message: "Error joining meeting", error: err.message });
   }
+});
+
+app.post("/meetings/:code/add-participant", async (req, res) => {
+  const { username: targetUsernameRaw, role, currentUsername } = req.body || {};
+  const targetUsername = (targetUsernameRaw || "").trim();
+  const actorUsername = (currentUsername || "").trim();
+  const normalizedRole = (role || "").toLowerCase();
+  const allowedRoles = ["member", "observer"];
+
+  if (!actorUsername) {
+    return res.status(400).json({ message: "currentUsername is required" });
+  }
+  if (!targetUsername) {
+    return res.status(400).json({ message: "username is required" });
+  }
+  if (!allowedRoles.includes(normalizedRole)) {
+    return res.status(400).json({ message: "role must be 'member' or 'observer'" });
+  }
+
+  const meeting = await getMeetingByCode(req.params.code);
+  if (!meeting) return res.status(404).json({ message: "Meeting not found" });
+  if (guardAdjournedMeeting(meeting, res)) return;
+
+  const actorRole = getUserRole(meeting, actorUsername);
+  if (!["owner", "chair"].includes((actorRole || "").toLowerCase())) {
+    return res.status(403).json({ message: "Only the owner or chair can add participants." });
+  }
+
+  const alreadyParticipant = (meeting.participants || []).some(
+    (participant) => participant.username === targetUsername
+  );
+  if (alreadyParticipant) {
+    return res.status(400).json({ message: "User is already a participant in this meeting." });
+  }
+
+  const user = await User.findOne({ username: targetUsername });
+  if (!user) {
+    return res.status(404).json({ message: "User not found" });
+  }
+
+  const displayName = [user.firstName, user.lastName].filter(Boolean).join(" ").trim() || user.username;
+  meeting.participants = meeting.participants || [];
+  meeting.participants.push({
+    username: user.username,
+    role: normalizedRole,
+    displayName,
+    joinedAt: new Date(),
+  });
+
+  try {
+    await meeting.save();
+  } catch (err) {
+    console.error("Error saving meeting while adding participant", err);
+    return res.status(500).json({ message: "Failed to add participant", error: err.message });
+  }
+
+  try {
+    user.notifications = user.notifications || [];
+    user.notifications.push({
+      type: "addedToMeeting",
+      message: `You have been added to meeting "${meeting.title || meeting.code}" as ${normalizedRole} by ${actorUsername}.`,
+      meetingCode: meeting.code,
+      meetingTitle: meeting.title || meeting.code,
+      role: normalizedRole,
+      addedBy: actorUsername,
+      createdAt: new Date(),
+      read: false,
+    });
+    await user.save();
+  } catch (err) {
+    console.error("Failed to append notification for user", err);
+  }
+
+  res.json({ meeting });
+});
+
+app.get("/notifications", async (req, res) => {
+  const username = (req.query.username || "").trim();
+  if (!username) {
+    return res.status(400).json({ message: "username query param is required" });
+  }
+  try {
+    const user = await User.findOne({ username }, { notifications: 1, _id: 0 }).lean();
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+    const notifications = (user.notifications || []).sort(
+      (a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0)
+    );
+    res.json({ notifications });
+  } catch (err) {
+    console.error("Error fetching notifications", err);
+    res.status(500).json({ message: "Failed to load notifications", error: err.message });
+  }
+});
+
+app.post("/notifications/mark-read", async (req, res) => {
+  const { username, notificationId, all } = req.body || {};
+  if (!username) {
+    return res.status(400).json({ message: "username is required" });
+  }
+
+  const user = await User.findOne({ username });
+  if (!user) {
+    return res.status(404).json({ message: "User not found" });
+  }
+
+  if (all) {
+    user.notifications = (user.notifications || []).map((notif) => {
+      if (typeof notif.toObject === "function") {
+        const obj = notif.toObject();
+        obj.read = true;
+        return obj;
+      }
+      return { ...notif, read: true };
+    });
+  } else if (notificationId) {
+    const target = (user.notifications || []).find(
+      (notif) => String(notif._id) === String(notificationId)
+    );
+    if (!target) {
+      return res.status(404).json({ message: "Notification not found" });
+    }
+    target.read = true;
+  } else {
+    return res.status(400).json({ message: "Provide notificationId or all=true" });
+  }
+
+  await user.save();
+  const notifications = (user.notifications || []).sort(
+    (a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0)
+  );
+  res.json({ notifications });
 });
 
 app.post("/meetings/:code/motions", async (req, res) => {

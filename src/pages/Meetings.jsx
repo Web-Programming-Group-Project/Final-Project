@@ -23,6 +23,7 @@ import {
   downloadMeetingMinutesTxt as apiDownloadMeetingMinutesTxt,
   createOverturnMotion as apiCreateOverturnMotion,
   recordChairDecision as apiRecordChairDecision,
+  addParticipant as apiAddParticipant,
 } from "../api";
 
 function resolveSubMotionType(motion) {
@@ -121,6 +122,10 @@ export default function Meetings() {
   const [previousDetailsExpanded, setPreviousDetailsExpanded] = useState({});
   const [downloadingMinutesTxt, setDownloadingMinutesTxt] = useState(false);
   const [downloadingMinutesPdf, setDownloadingMinutesPdf] = useState(false);
+  const [addParticipantUsername, setAddParticipantUsername] = useState("");
+  const [addParticipantRole, setAddParticipantRole] = useState("member");
+  const [addParticipantError, setAddParticipantError] = useState("");
+  const [addingParticipant, setAddingParticipant] = useState(false);
   const [subMotionMode, setSubMotionMode] = useState("none"); // none | overturn | revise | postpone
   const [subMotionParentId, setSubMotionParentId] = useState(null);
   const [postponeUntilInput, setPostponeUntilInput] = useState("");
@@ -306,6 +311,7 @@ export default function Meetings() {
   const canRaiseMotion = canRaiseMotionBase && !isAdjourned;
   const showRaiseButton = normalizedRole !== "observer";
   const canCloseVotingRole = normalizedRole === "chair" || (normalizedRole === "owner" && !otherChairExists);
+  const canAddParticipants = canManageMotions && !isAdjourned;
   const canSend = Boolean(username) && !isAdjourned;
   const chatInputPlaceholder = isAdjourned
     ? "Meeting adjourned — chat is closed."
@@ -630,6 +636,37 @@ export default function Meetings() {
       setRoleError(err.message || "Failed to update role");
     } finally {
       setRoleUpdating(null);
+    }
+  }
+
+  async function handleAddParticipant(e) {
+    e?.preventDefault();
+    if (!code || !username) return;
+    const target = addParticipantUsername.trim();
+    if (!target) {
+      setAddParticipantError("Username is required.");
+      return;
+    }
+    setAddingParticipant(true);
+    setAddParticipantError("");
+    try {
+      const updatedMeeting = await apiAddParticipant({
+        code,
+        username: target,
+        role: addParticipantRole,
+        currentUsername: username,
+      });
+      setMeeting(updatedMeeting);
+      setAddParticipantUsername("");
+      setAddParticipantRole("member");
+    } catch (err) {
+      const errorMessage = err.message || "Failed to add participant";
+      setAddParticipantError(errorMessage);
+      if (isAdjournedErrorMessage(errorMessage)) {
+        refreshMeetingState();
+      }
+    } finally {
+      setAddingParticipant(false);
     }
   }
 
@@ -1030,6 +1067,78 @@ export default function Meetings() {
                     <li>No participants yet</li>
                   )}
                 </ul>
+                {canManageMotions && (
+                  isAdjourned ? (
+                    <div style={{ marginTop: 8, color: "#777", fontSize: "0.9rem" }}>
+                      Meeting adjourned — cannot add participants.
+                    </div>
+                  ) : (
+                    <>
+                      <div
+                        className="add-participant-row"
+                        style={{
+                          marginTop: 10,
+                          display: "flex",
+                          gap: 8,
+                          flexWrap: "wrap",
+                          alignItems: "center",
+                        }}
+                      >
+                        <input
+                          type="text"
+                          value={addParticipantUsername}
+                          onChange={(e) => {
+                            setAddParticipantUsername(e.target.value);
+                            setAddParticipantError("");
+                          }}
+                          placeholder="Add user by username..."
+                          style={{
+                            flex: "1 1 160px",
+                            borderRadius: 6,
+                            border: "1px solid #b0c4de",
+                            padding: "4px 8px",
+                          }}
+                        />
+                        <select
+                          value={addParticipantRole}
+                          onChange={(e) => {
+                            setAddParticipantRole(e.target.value);
+                            setAddParticipantError("");
+                          }}
+                          style={{
+                            borderRadius: 6,
+                            border: "1px solid #b0c4de",
+                            padding: "4px 6px",
+                          }}
+                        >
+                          <option value="member">Member</option>
+                          <option value="observer">Observer</option>
+                        </select>
+                        <button
+                          type="button"
+                          onClick={handleAddParticipant}
+                          disabled={addingParticipant || !addParticipantUsername.trim()}
+                          style={{
+                            borderRadius: 6,
+                            border: "none",
+                            background: addingParticipant ? "#9fbfdc" : "#0582CA",
+                            color: "#fff",
+                            padding: "6px 12px",
+                            fontWeight: 600,
+                            cursor: addingParticipant || !addParticipantUsername.trim() ? "not-allowed" : "pointer",
+                          }}
+                        >
+                          {addingParticipant ? "Adding..." : "Add"}
+                        </button>
+                      </div>
+                      {addParticipantError && (
+                        <div style={{ marginTop: 6, color: "#b71c1c", fontSize: "0.85rem" }}>
+                          {addParticipantError}
+                        </div>
+                      )}
+                    </>
+                  )
+                )}
               </div>
               <div
                 style={{

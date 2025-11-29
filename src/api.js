@@ -536,6 +536,49 @@ export async function downloadMeetingMinutesPdf({ code, filename, meeting }) {
   doc.save(filename || "meeting-minutes.pdf");
 }
 
+export async function addParticipant({ code, username, role, currentUsername }) {
+  const res = await fetch(`${API_BASE}/meetings/${encodeURIComponent(code)}/add-participant`, {
+    method: "POST",
+    headers: buildHeaders({ json: true }),
+    body: JSON.stringify({ username, role, currentUsername }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.message || "Failed to add participant");
+  return data.meeting || data;
+}
+
+export async function getNotifications({ username }) {
+  const params = new URLSearchParams({ username });
+  const res = await fetch(`${API_BASE}/notifications?${params.toString()}`, {
+    headers: buildHeaders(),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.message || "Failed to load notifications");
+  return data;
+}
+
+export async function markNotificationRead({ username, notificationId }) {
+  const res = await fetch(`${API_BASE}/notifications/mark-read`, {
+    method: "POST",
+    headers: buildHeaders({ json: true }),
+    body: JSON.stringify({ username, notificationId }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.message || "Failed to update notification");
+  return data;
+}
+
+export async function markAllNotificationsRead({ username }) {
+  const res = await fetch(`${API_BASE}/notifications/mark-read`, {
+    method: "POST",
+    headers: buildHeaders({ json: true }),
+    body: JSON.stringify({ username, all: true }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.message || "Failed to update notifications");
+  return data;
+}
+
 export async function createOverturnMotion({
   meetingId,
   username,
