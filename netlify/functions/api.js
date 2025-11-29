@@ -4,7 +4,7 @@ const express = require("express");
 const mongoose = require("mongoose");
 const dotenv = require("dotenv");
 const cors = require("cors");
-const User = require("../../src/models/User"); 
+const User = require("../../src/models/User");
 const Meeting = require("../../src/models/Meeting");
 
 dotenv.config();
@@ -143,6 +143,19 @@ async function getMeetingByCode(code) {
 function getUserRole(meeting, username) {
   const participant = meeting?.participants?.find((p) => p.username === username);
   return participant ? participant.role : null;
+}
+
+function sanitizeUser(user) {
+  if (!user) return null;
+  return {
+    _id: user._id,
+    username: user.username,
+    email: user.email,
+    firstName: user.firstName,
+    lastName: user.lastName,
+    createdAt: user.createdAt,
+    updatedAt: user.updatedAt,
+  };
 }
 
 async function addOrUpdateParticipant({ code, username, displayName, defaultRole = "member" }) {
@@ -298,6 +311,139 @@ app.post("/meetings/:code/join", async (req, res) => {
   }
 });
 
+app.post("/meetings/:code/add-participant", async (req, res) => {
+  const { username: targetUsernameRaw, role, currentUsername } = req.body || {};
+  const targetUsername = (targetUsernameRaw || "").trim();
+  const actorUsername = (currentUsername || "").trim();
+  const normalizedRole = (role || "").toLowerCase();
+  const allowedRoles = ["member", "observer"];
+
+  if (!actorUsername) {
+    return res.status(400).json({ message: "currentUsername is required" });
+  }
+  if (!targetUsername) {
+    return res.status(400).json({ message: "username is required" });
+  }
+  if (!allowedRoles.includes(normalizedRole)) {
+    return res.status(400).json({ message: "role must be 'member' or 'observer'" });
+  }
+
+  const meeting = await getMeetingByCode(req.params.code);
+  if (!meeting) return res.status(404).json({ message: "Meeting not found" });
+  if (guardAdjournedMeeting(meeting, res)) return;
+
+  const actorRole = getUserRole(meeting, actorUsername);
+  if (!["owner", "chair"].includes((actorRole || "").toLowerCase())) {
+    return res.status(403).json({ message: "Only the owner or chair can add participants." });
+  }
+
+  const alreadyParticipant = (meeting.participants || []).some(
+    (participant) => participant.username === targetUsername
+  );
+  if (alreadyParticipant) {
+    return res.status(400).json({ message: "User is already a participant in this meeting." });
+  }
+
+  const user = await User.findOne({ username: targetUsername });
+  if (!user) {
+    return res.status(404).json({ message: "User not found" });
+  }
+
+  const displayName = [user.firstName, user.lastName].filter(Boolean).join(" ").trim() || user.username;
+  meeting.participants = meeting.participants || [];
+  meeting.participants.push({
+    username: user.username,
+    role: normalizedRole,
+    displayName,
+    joinedAt: new Date(),
+  });
+
+  try {
+    await meeting.save();
+  } catch (err) {
+    console.error("Error saving meeting while adding participant", err);
+    return res.status(500).json({ message: "Failed to add participant", error: err.message });
+  }
+
+  try {
+    user.notifications = user.notifications || [];
+    user.notifications.push({
+      type: "addedToMeeting",
+      message: `You have been added to meeting "${meeting.title || meeting.code}" as ${normalizedRole} by ${actorUsername}.`,
+      meetingCode: meeting.code,
+      meetingTitle: meeting.title || meeting.code,
+      role: normalizedRole,
+      addedBy: actorUsername,
+      createdAt: new Date(),
+      read: false,
+    });
+    await user.save();
+  } catch (err) {
+    console.error("Failed to append notification for user", err);
+  }
+
+  res.json({ meeting });
+});
+
+app.get("/notifications", async (req, res) => {
+  const username = (req.query.username || "").trim();
+  if (!username) {
+    return res.status(400).json({ message: "username query param is required" });
+  }
+  try {
+    const user = await User.findOne({ username }, { notifications: 1, _id: 0 }).lean();
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+    const notifications = (user.notifications || []).sort(
+      (a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0)
+    );
+    res.json({ notifications });
+  } catch (err) {
+    console.error("Error fetching notifications", err);
+    res.status(500).json({ message: "Failed to load notifications", error: err.message });
+  }
+});
+
+app.post("/notifications/mark-read", async (req, res) => {
+  const { username, notificationId, all } = req.body || {};
+  if (!username) {
+    return res.status(400).json({ message: "username is required" });
+  }
+
+  const user = await User.findOne({ username });
+  if (!user) {
+    return res.status(404).json({ message: "User not found" });
+  }
+
+  if (all) {
+    user.notifications = (user.notifications || []).map((notif) => {
+      if (typeof notif.toObject === "function") {
+        const obj = notif.toObject();
+        obj.read = true;
+        return obj;
+      }
+      return { ...notif, read: true };
+    });
+  } else if (notificationId) {
+    const target = (user.notifications || []).find(
+      (notif) => String(notif._id) === String(notificationId)
+    );
+    if (!target) {
+      return res.status(404).json({ message: "Notification not found" });
+    }
+    target.read = true;
+  } else {
+    return res.status(400).json({ message: "Provide notificationId or all=true" });
+  }
+
+  await user.save();
+  const notifications = (user.notifications || []).sort(
+    (a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0)
+  );
+  res.json({ notifications });
+});
+
 app.post("/meetings/:code/motions", async (req, res) => {
   const { username } = req.body || {};
   const rawTitle = (req.body?.motionTitle ?? req.body?.title ?? "").trim();
@@ -355,6 +501,11 @@ app.post("/meetings/:code/motions", async (req, res) => {
   const participantRole = getUserRole(mtg, username);
   if (!participantRole) {
     return res.status(403).json({ message: "You must be a participant of this meeting to raise motions." });
+  }
+  const participantRoleNormalized = String(participantRole || "").toLowerCase();
+  const allowedMotionRoles = ["owner", "chair", "member"];
+  if (!allowedMotionRoles.includes(participantRoleNormalized)) {
+    return res.status(403).json({ message: "You do not have permission to raise motions." });
   }
 
   let parentMotion = null;
@@ -566,9 +717,19 @@ async function closeMotionRoute(req, res) {
   const mtg = await getMeetingByCode(req.params.code);
   if (!mtg) return res.status(404).json({ message: "Meeting not found" });
 
-  const role = getUserRole(mtg, username);
-  if (!["owner", "chair"].includes(role)) {
-    return res.status(403).json({ message: "Only the chair/owner can close a motion" });
+  const participant = mtg.participants?.find((p) => p.username === username);
+  if (!participant) {
+    return res.status(403).json({ message: "You are not part of this meeting." });
+  }
+  const participantRole = String(participant.role || "").toLowerCase();
+  const otherChairExists = (mtg.participants || []).some(
+    (p) => String(p.role || "").toLowerCase() === "chair" && p.username !== participant.username
+  );
+  const canCloseVoting = participantRole === "chair" || (participantRole === "owner" && !otherChairExists);
+  if (!canCloseVoting) {
+    return res.status(403).json({
+      message: "Only the current chair (or owner when no chair is assigned) can close voting on motions.",
+    });
   }
 
   const motion = mtg.motions.id(req.params.motionId);
@@ -1151,6 +1312,66 @@ app.put("/update/bio", async (req, res) => {
   user.bio = bio;
   await user.save();
   res.json({ message: "Bio updated successfully", user});
+});
+
+app.get("/users/:username", async (req, res) => {
+  const { username } = req.params;
+  if (!username) {
+    return res.status(400).json({ message: "Username is required" });
+  }
+  try {
+    const user = await User.findOne({ username });
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+    res.json({ user: sanitizeUser(user) });
+  } catch (err) {
+    console.error("Error fetching user profile", err);
+    res.status(500).json({ message: "Failed to load profile", error: err.message });
+  }
+});
+
+app.patch("/users/:username", async (req, res) => {
+  const { username } = req.params;
+  const { firstName, lastName, email, username: nextUsername, password } = req.body || {};
+
+  if (!username) {
+    return res.status(400).json({ message: "Username is required" });
+  }
+  if (![firstName, lastName, email, nextUsername].every((value) => typeof value === "string" && value.trim())) {
+    return res.status(400).json({ message: "First name, last name, username, and email are required" });
+  }
+
+  try {
+    const user = await User.findOne({ username });
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    const normalizedNextUsername = nextUsername.trim();
+    if (normalizedNextUsername !== user.username) {
+      const existing = await User.findOne({
+        username: normalizedNextUsername,
+        _id: { $ne: user._id },
+      });
+      if (existing) {
+        return res.status(400).json({ message: "Username already taken" });
+      }
+    }
+
+    user.firstName = firstName.trim();
+    user.lastName = lastName.trim();
+    user.email = email.trim();
+    user.username = normalizedNextUsername;
+    if (typeof password === "string" && password.trim()) {
+      user.password = password;
+    }
+    await user.save();
+    res.json({ message: "Profile updated", user: sanitizeUser(user) });
+  } catch (err) {
+    console.error("Error updating user profile", err);
+    res.status(500).json({ message: "Failed to update profile", error: err.message });
+  }
 });
 
 

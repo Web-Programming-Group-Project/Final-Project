@@ -1,5 +1,5 @@
 import React from "react";
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useAppContext } from "../../AppContext";
 import Header from "../../components/Header";
 import { useNavigate } from "react-router-dom";
@@ -48,7 +48,7 @@ export default function JoinCreate() {
       setLoadingList(true);
       setListError("");
       try {
-        const data = await listMeetings({ username, view: activeTab });
+        const data = await listMeetings({ username });
         if (!cancelled) {
           setMeetings(data.meetings || []);
         }
@@ -63,34 +63,24 @@ export default function JoinCreate() {
     }
     load();
     return () => { cancelled = true; };
-  }, [username, activeTab]);
+  }, [username]);
 
   useEffect(() => {
     setCopiedCode(null);
   }, [activeTab]);
 
-  async function refreshMeetings(view = activeTab) {
+  async function refreshMeetings() {
     if (!username) return;
-    const targetView = view;
-    const affectsCurrentView = targetView === activeTab;
-    if (affectsCurrentView) {
-      setLoadingList(true);
-      setListError("");
-    }
+    setLoadingList(true);
+    setListError("");
     try {
-      const data = await listMeetings({ username, view: targetView });
-      if (targetView === activeTab) {
-        setMeetings(data.meetings || []);
-      }
+      const data = await listMeetings({ username });
+      setMeetings(data.meetings || []);
     } catch (err) {
       console.error("Failed to refresh meetings", err);
-      if (targetView === activeTab) {
-        setListError(err.message || "Failed to refresh meetings");
-      }
+      setListError(err.message || "Failed to refresh meetings");
     } finally {
-      if (targetView === activeTab) {
-        setLoadingList(false);
-      }
+      setLoadingList(false);
     }
   }
 
@@ -129,7 +119,7 @@ export default function JoinCreate() {
         username,
         displayName: joinDisplayName?.trim(),
       });
-      await refreshMeetings(activeTab);
+      await refreshMeetings();
       setShowJoinForm(false);
       navigate("/Meetings", { state: { meeting: data.meeting, code: data.meeting?.code } });
     } catch (err) {
@@ -149,11 +139,8 @@ export default function JoinCreate() {
       throw new Error("Title is required");
     }
     const meeting = await apiCreateMeeting({ title, username, displayName: username });
-    if (activeTab === "my") {
-      await refreshMeetings("my");
-    } else {
-      setActiveTab("my");
-    }
+    await refreshMeetings();
+    setActiveTab("my");
     return meeting;
   }
 
@@ -176,6 +163,13 @@ export default function JoinCreate() {
     }
     navigate("/Meetings", { state: { meeting, code: meeting.code } });
   }
+
+  const recentMeetings = meetings || [];
+  const myMeetings = useMemo(() => {
+    if (!username) return [];
+    // My Meetings shows only those the current user owns.
+    return recentMeetings.filter((meeting) => meeting?.creator === username);
+  }, [recentMeetings, username]);
   
   return (
     <>
@@ -231,14 +225,14 @@ export default function JoinCreate() {
                   </td>
                 </tr>
               )}
-              {!loadingList && meetings.length === 0 && (
+              {!loadingList && myMeetings.length === 0 && (
                 <tr>
                   <td colSpan={3} style={{ textAlign: "center", padding: "1rem", color: "#666" }}>
                     No meetings yet.
                   </td>
                 </tr>
               )}
-              {!loadingList && meetings.map((meeting) => (
+              {!loadingList && myMeetings.map((meeting) => (
                 <tr key={meeting._id || meeting.code || meeting.title}>
                   <td>{meeting.title || meeting.name}</td>
                   <td><code>{meeting.code || "—"}</code></td>
@@ -284,17 +278,17 @@ export default function JoinCreate() {
                   </td>
                 </tr>
               )}
-              {!loadingList && meetings.length === 0 && (
+              {!loadingList && recentMeetings.length === 0 && (
                 <tr>
                   <td colSpan={3} style={{ textAlign: "center", padding: "1rem", color: "#666" }}>
                     No recent meetings found.
                   </td>
                 </tr>
               )}
-              {!loadingList && meetings.map((meeting) => (
+              {!loadingList && recentMeetings.map((meeting) => (
                 <tr key={meeting._id || meeting.code || meeting.title}>
                   <td>{meeting.title || meeting.name}</td>
-                  <td>{meeting.owner || meeting.createdBy || "Unknown"}</td>
+                  <td>{meeting.creator || meeting.owner || meeting.createdBy || "Unknown"}</td>
                   <td>
                     <button
                       type="button"
