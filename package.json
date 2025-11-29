@@ -12,9 +12,12 @@
     "dependencies": {
         "@blueprintjs/core": "^6.3.1",
         "@blueprintjs/icons": "^6.1.0",
+        "bcrypt": "^6.0.0",
         "cors": "^2.8.5",
         "dotenv": "^16.4.5",
         "express": "^4.19.2",
+        "jsonwebtoken": "^9.0.2",
+        "jspdf": "^3.0.4",
         "mongoose": "^8.6.0",
         "react": "^18.3.1",
         "react-dom": "^18.3.1",

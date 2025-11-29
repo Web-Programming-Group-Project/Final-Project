@@ -19,7 +19,8 @@ import {
   closeMotion as apiCloseMotion,
   addReplyToMotion,
   updateMeetingSummary as apiUpdateMeetingSummary,
-  downloadMeetingMinutes as apiDownloadMeetingMinutes,
+  downloadMeetingMinutesPdf as apiDownloadMeetingMinutesPdf,
+  downloadMeetingMinutesTxt as apiDownloadMeetingMinutesTxt,
   createOverturnMotion as apiCreateOverturnMotion,
   recordChairDecision as apiRecordChairDecision,
 } from "../api";
@@ -118,7 +119,8 @@ export default function Meetings() {
   const [meetingSummarySaving, setMeetingSummarySaving] = useState(false);
   const [meetingSummaryError, setMeetingSummaryError] = useState("");
   const [previousDetailsExpanded, setPreviousDetailsExpanded] = useState({});
-  const [downloadingMinutes, setDownloadingMinutes] = useState(false);
+  const [downloadingMinutesTxt, setDownloadingMinutesTxt] = useState(false);
+  const [downloadingMinutesPdf, setDownloadingMinutesPdf] = useState(false);
   const [subMotionMode, setSubMotionMode] = useState("none"); // none | overturn | revise | postpone
   const [subMotionParentId, setSubMotionParentId] = useState(null);
   const [postponeUntilInput, setPostponeUntilInput] = useState("");
@@ -719,28 +721,38 @@ export default function Meetings() {
     }
   }
 
-  async function handleDownloadMinutes() {
+  async function handleDownloadMinutesTxt() {
     if (!code) return;
-    setDownloadingMinutes(true);
+    setDownloadingMinutesTxt(true);
+    const filename = buildMinutesFilename({
+      title: meeting?.title,
+      code: meeting?.code || code,
+    });
     try {
-      const blob = await apiDownloadMeetingMinutes({ code });
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      const filename = buildMinutesFilename({
-        title: meeting?.title,
-        code: meeting?.code || code,
-      });
-      link.download = filename;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      window.URL.revokeObjectURL(url);
+      await apiDownloadMeetingMinutesTxt({ code, filename });
     } catch (err) {
       console.error("Failed to download minutes", err);
       window.alert(err.message || "Failed to download minutes");
     } finally {
-      setDownloadingMinutes(false);
+      setDownloadingMinutesTxt(false);
+    }
+  }
+
+  async function handleDownloadMinutesPdf() {
+    if (!code) return;
+    setDownloadingMinutesPdf(true);
+    const slug =
+      sanitizeTitleForFilename(meeting?.title) ||
+      sanitizeTitleForFilename(meeting?.code || code) ||
+      "meeting";
+    const filename = `${slug}-minutes.pdf`;
+    try {
+      await apiDownloadMeetingMinutesPdf({ code, filename, meeting });
+    } catch (err) {
+      console.error("Failed to download minutes as PDF", err);
+      window.alert(err.message || "Failed to download minutes as PDF");
+    } finally {
+      setDownloadingMinutesPdf(false);
     }
   }
 
@@ -951,20 +963,37 @@ export default function Meetings() {
                   )}
                   <button
                     type="button"
-                    onClick={handleDownloadMinutes}
-                    disabled={downloadingMinutes}
+                    onClick={handleDownloadMinutesTxt}
+                    disabled={downloadingMinutesTxt}
                     style={{
                       borderRadius: 6,
                       border: "none",
-                      background: downloadingMinutes ? "#9fbfdc" : "#0582CA",
+                      background: downloadingMinutesTxt ? "#9fbfdc" : "#0582CA",
                       color: "#fff",
                       padding: "6px 12px",
                       fontWeight: 600,
-                      cursor: downloadingMinutes ? "not-allowed" : "pointer",
-                      opacity: downloadingMinutes ? 0.8 : 1,
+                      cursor: downloadingMinutesTxt ? "not-allowed" : "pointer",
+                      opacity: downloadingMinutesTxt ? 0.8 : 1,
                     }}
                   >
-                    {downloadingMinutes ? "Downloading..." : "Download minutes"}
+                    {downloadingMinutesTxt ? "Downloading..." : "Download minutes (.txt)"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleDownloadMinutesPdf}
+                    disabled={downloadingMinutesPdf}
+                    style={{
+                      borderRadius: 6,
+                      border: "1px solid #0582CA",
+                      background: "#fff",
+                      color: downloadingMinutesPdf ? "#7fa8c7" : "#0582CA",
+                      padding: "6px 12px",
+                      fontWeight: 600,
+                      cursor: downloadingMinutesPdf ? "not-allowed" : "pointer",
+                      opacity: downloadingMinutesPdf ? 0.8 : 1,
+                    }}
+                  >
+                    {downloadingMinutesPdf ? "Preparing PDF..." : "Download as PDF"}
                   </button>
                 </div>
               </div>
