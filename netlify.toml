@@ -18,8 +18,13 @@
   to = "/.netlify/functions/api/:splat"
   status = 200
 
-[context.production]
-  [[context.production.redirects]]
-    from = "/*"
-    to = "/index.html"
-    status = 200
+[[redirects]]
+  from = "/.netlify/functions/*"
+  to = "/.netlify/functions/:splat"
+  status = 200
+
+# SPA fallback redirect — *this is what fixes refreshes*
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
