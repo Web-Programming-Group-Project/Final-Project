@@ -31,9 +31,29 @@ The main screen with site name and register and login buttons at the center. Not
 <img width="1511" height="848" alt="Screenshot 2025-12-16 at 3 32 14 PM" src="https://github.com/user-attachments/assets/747f7963-ef67-45e0-85fb-fd78ae1f6e97" />
 Profile screen that allows users to change name, username, and password.
 
+<img width="1511" height="848" alt="Screenshot 2025-12-16 at 3 43 19 PM" src="https://github.com/user-attachments/assets/b63de64b-2cd5-49ad-94f2-897315177330" />
+Page where users can create new meetings or join meetings created by others.
 
+<img width="1511" height="848" alt="Screenshot 2025-12-16 at 3 44 33 PM" src="https://github.com/user-attachments/assets/6aaf772e-3c7a-400e-97f6-fb2d0a44fde0" />
+Toggling "Recent Meetings" in the top left allows users to access meetings they have created in the past.
 
+<img width="1511" height="848" alt="Screenshot 2025-12-16 at 3 51 14 PM" src="https://github.com/user-attachments/assets/17e4c700-a71b-490b-8026-7a44571eff9b" />
+Actual meeting page where users can add other members into the meeting. In addition, users can click the red "Raise Motion" button to propose an action during the meeting.
 
+<img width="1511" height="848" alt="Screenshot 2025-12-16 at 3 54 14 PM" src="https://github.com/user-attachments/assets/60ca5a42-6345-44bb-935d-e0f5dd7bacf5" />
+After clicking the "Raise Motion" button the user is allowed to choose different settings they want their motion to allow.
+
+<img width="458" height="521" alt="Screenshot 2025-12-16 at 3 56 09 PM" src="https://github.com/user-attachments/assets/9e9b45c8-ab9a-4973-807a-3d5c30542f3c" />
+The motion that is proposed will appear in the chat box and the members in the meeting will be allowed to vote for or against the proposition. These users will also be allowed to type responses to the motions and in the meeting chat in general. The owner can also revise the motion, close the motion, or postpone the motion.
+
+<img width="498" height="482" alt="Screenshot 2025-12-16 at 4 04 20 PM" src="https://github.com/user-attachments/assets/1b2dce0b-19ee-4545-a3c5-4b0a88ad1c77" />
+This special type of motion allows the user to adjourn the meeting or close the debate. 
+
+<img width="446" height="681" alt="Screenshot 2025-12-16 at 4 05 13 PM" src="https://github.com/user-attachments/assets/97efe190-4d5f-4f22-b109-4b7f55981a11" />
+If the special motion passes, the meeting will close automatically.
+
+<img width="1512" height="858" alt="Screenshot 2025-12-16 at 4 06 18 PM" src="https://github.com/user-attachments/assets/838a89a9-e43d-44b4-b9a5-54a8c2857440" />
+This is what the page looks like when a meeting is ended. In the overall meeting bubble, users can download a summary of the meeting in a pdf file, which will summarize all the things that were covered during the meeting.
 
 ## Backend API Documentation
 
