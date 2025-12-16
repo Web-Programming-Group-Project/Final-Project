@@ -25,7 +25,14 @@ Web Programming Final Project
 - [Convo Demo Video](https://www.youtube.com/watch?v=L_6vDUoP5XA)
 
 ## Walk Through of Features
-- <img width="863" height="328" alt="Screenshot 2025-12-16 at 3 00 55 PM" src="https://github.com/user-attachments/assets/b50f4f14-47ba-4754-8281-3ad9b435fc3e" />
+<img width="1511" height="848" alt="Screenshot 2025-12-16 at 3 31 08 PM" src="https://github.com/user-attachments/assets/1d8e76a3-e996-414f-8ae4-0b47c17f7ecc" />
+The main screen with site name and register and login buttons at the center. Notifications, profile, and sign out buttons on the top right of the screen.
+
+<img width="1511" height="848" alt="Screenshot 2025-12-16 at 3 32 14 PM" src="https://github.com/user-attachments/assets/747f7963-ef67-45e0-85fb-fd78ae1f6e97" />
+Profile screen that allows users to change name, username, and password.
+
+
+
 
 
 ## Backend API Documentation
