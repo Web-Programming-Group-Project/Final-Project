@@ -25,7 +25,8 @@ Web Programming Final Project
 - [Convo Demo Video](https://www.youtube.com/watch?v=L_6vDUoP5XA)
 
 ## Walk Through of Features
-- 
+- <img width="863" height="328" alt="Screenshot 2025-12-16 at 3 00 55 PM" src="https://github.com/user-attachments/assets/b50f4f14-47ba-4754-8281-3ad9b435fc3e" />
+
 
 ## Backend API Documentation
 
